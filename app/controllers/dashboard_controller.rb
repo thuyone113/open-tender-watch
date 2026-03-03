@@ -2,14 +2,18 @@ class DashboardController < ApplicationController
   include ActionView::Helpers::NumberHelper
 
   def index
-    flagged_contract_ids = Flag.distinct.pluck(:contract_id)
+    @severity_filter = params[:severity].presence
+    flags_scope = @severity_filter ? Flag.where(severity: @severity_filter) : Flag
+
+    flagged_contract_ids = flags_scope.distinct.pluck(:contract_id)
     flagged_contracts_scope = Contract.where(id: flagged_contract_ids)
-    flags_count = Flag.count
+    flags_count = flags_scope.count
     @flag_types = Flag.distinct.order(:flag_type).pluck(:flag_type)
+    @flags_by_type = flags_scope.group(:flag_type).order(:flag_type).count
     @insights_count = flags_count
     @entity_sort = params[:entity_sort] == "count" ? "count" : "value"
     @entity_flag_type = params[:entity_flag_type].presence
-    @entity_exposure_rows = entity_exposure_rows(sort_by: @entity_sort, flag_type: @entity_flag_type)
+    @entity_exposure_rows = entity_exposure_rows(sort_by: @entity_sort, flag_type: @entity_flag_type, severity: @severity_filter)
 
     @stats = [
       { label: t("stats.contracts"), value: number_with_delimiter(Contract.count),              color: "text-[#c8a84e]" },
@@ -53,9 +57,10 @@ class DashboardController < ApplicationController
 
   private
 
-  def entity_exposure_rows(sort_by:, flag_type:)
+  def entity_exposure_rows(sort_by:, flag_type:, severity: nil)
     scope = Flag.joins(contract: :contracting_entity)
     scope = scope.where(flag_type: flag_type) if flag_type.present?
+    scope = scope.where(severity: severity) if severity.present?
 
     order_sql = if sort_by == "count"
       "exposure_count DESC, exposure_value DESC, entities.name ASC"

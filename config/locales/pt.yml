@@ -45,9 +45,17 @@ pt:
       col_value: "VALOR DE EXPOSIÇÃO"
       col_count: "CONTAGEM"
       empty: "Sem entidades sinalizadas para este filtro."
+    severity_filter:
+      all: "Todos"
+      high: "Alto"
+      medium: "Médio"
+      low: "Baixo"
     insights:
       pattern: "Padrão"
       empty: "Ainda não existem sinais pontuados. Execute as ações de scoring para preencher este painel."
+      flag_count:
+        one: "%{count} contrato"
+        other: "%{count} contratos"
     crossings:
       heading: "Ligação de entidades via NIF / NIPC"
       subheading: "Identificador único como chave de cruzamento entre bases de dados"

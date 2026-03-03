@@ -140,6 +140,78 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     assert_operator response.body.index("€4,000.00"), :<, response.body.index("€9,000.00")
   end
 
+  test "dashboard shows flag type insight cards with counts" do
+    create_flagged_contract!(
+      external_id: "insight-card-1",
+      object: "Insight Card Contract 1",
+      flag_type: "A2_PUBLICATION_AFTER_CELEBRATION"
+    )
+    create_flagged_contract!(
+      external_id: "insight-card-2",
+      object: "Insight Card Contract 2",
+      flag_type: "A2_PUBLICATION_AFTER_CELEBRATION"
+    )
+    create_flagged_contract!(
+      external_id: "insight-card-3",
+      object: "Insight Card Contract 3",
+      flag_type: "A9_PRICE_ANOMALY"
+    )
+
+    get dashboard_index_url
+    assert_response :success
+    assert_includes response.body, "A2_PUBLICATION_AFTER_CELEBRATION"
+    assert_includes response.body, "A9_PRICE_ANOMALY"
+  end
+
+  test "dashboard severity filter renders all severity buttons" do
+    get dashboard_index_url
+    assert_response :success
+    assert_includes response.body, I18n.t("dashboard.severity_filter.all")
+    assert_includes response.body, I18n.t("dashboard.severity_filter.high")
+    assert_includes response.body, I18n.t("dashboard.severity_filter.medium")
+    assert_includes response.body, I18n.t("dashboard.severity_filter.low")
+  end
+
+  test "dashboard severity filter scopes entity exposure by severity" do
+    entity = create_public_entity!(name: "Severity Filter Entity", tax_identifier: "599300111")
+
+    high_contract = create_flagged_contract!(
+      external_id: "sev-high-1",
+      object: "High Severity Contract",
+      flag_type: "A2_PUBLICATION_AFTER_CELEBRATION",
+      base_price: 5000,
+      contracting_entity: entity
+    )
+    medium_contract = Contract.create!(
+      external_id: "sev-med-1",
+      country_code: "PT",
+      object: "Medium Severity Contract",
+      procedure_type: "Ajuste Direto",
+      base_price: 3000,
+      publication_date: Date.new(2025, 1, 10),
+      celebration_date: Date.new(2025, 1, 8),
+      contracting_entity: entity,
+      data_source: data_sources(:portal_base)
+    )
+    Flag.create!(
+      contract: medium_contract,
+      flag_type: "A9_PRICE_ANOMALY",
+      severity: "medium",
+      score: 30,
+      fired_at: Time.current
+    )
+
+    get dashboard_index_url, params: { severity: "high" }
+    assert_response :success
+    assert_includes response.body, "€5,000.00"
+    assert_not_includes response.body, "€3,000.00"
+
+    get dashboard_index_url, params: { severity: "medium" }
+    assert_response :success
+    assert_includes response.body, "€3,000.00"
+    assert_not_includes response.body, "€5,000.00"
+  end
+
   test "dashboard sources pane uses real contract counts instead of stale metadata" do
     data_sources(:portal_base).update!(record_count: 0, status: :active)
 

@@ -65,6 +65,40 @@
       </div>
     </div>
 
+    <%# Severity filter %>
+    <div class="flex items-center gap-2 mb-5">
+      <span class="font-mono text-[10px] tracking-[2px] text-white/35 uppercase mr-1"><%= t("dashboard.severity_filter.all") %>:</span>
+      <% [nil, "high", "medium", "low"].each do |sev| %>
+        <% label  = sev ? t("dashboard.severity_filter.#{sev}") : t("dashboard.severity_filter.all") %>
+        <% active = @severity_filter == sev %>
+        <% color  = sev == "high"   ? "border-[#ff444466] text-[#ff4444] #{active ? 'bg-[#ff44440d]' : 'bg-transparent hover:bg-[#ff44440d]'}" :
+                    sev == "medium" ? "border-[#ff884466] text-[#ff8844] #{active ? 'bg-[#ff88440d]' : 'bg-transparent hover:bg-[#ff88440d]'}" :
+                    sev == "low"    ? "border-[#c8a84e66] text-[#c8a84e] #{active ? 'bg-[#c8a84e0d]' : 'bg-transparent hover:bg-[#c8a84e0d]'}" :
+                                      "border-white/20 text-white/50 #{active ? 'bg-white/[0.06]' : 'bg-transparent hover:bg-white/[0.04]'}" %>
+        <%= link_to label,
+              dashboard_index_path(severity: sev, entity_sort: @entity_sort, entity_flag_type: @entity_flag_type),
+              class: "font-mono text-[10px] tracking-[2px] uppercase px-3 py-1.5 rounded border transition-colors #{color} #{active ? 'font-bold' : ''}" %>
+      <% end %>
+    </div>
+
+    <%# Per-flag-type insight cards %>
+    <% if @flags_by_type.any? %>
+      <div class="grid grid-cols-2 gap-2 mb-6">
+        <% @flags_by_type.each do |flag_type, count| %>
+          <%= link_to dashboard_index_path(entity_flag_type: flag_type, entity_sort: @entity_sort, severity: @severity_filter),
+                class: "bg-white/[0.02] border border-white/[0.06] rounded-lg p-4 hover:border-[#c8a84e44] transition-colors group" do %>
+            <div class="font-mono text-[10px] tracking-[1px] text-[#c8a84e] mb-2 group-hover:text-[#c8a84e]">
+              <%= flag_type.tr("_", " ") %>
+            </div>
+            <div class="font-['Space_Grotesk'] text-2xl font-bold text-[#e8e0d4]"><%= number_with_delimiter(count) %></div>
+            <div class="font-mono text-[10px] text-white/30 mt-0.5">
+              <%= t("dashboard.insights.flag_count", count: count) %>
+            </div>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+
     <div class="border border-white/[0.08] rounded-lg p-5 mb-6 bg-black/10">
       <div class="flex flex-wrap items-end justify-between gap-4 mb-4">
         <div>
