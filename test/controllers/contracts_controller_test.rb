@@ -151,4 +151,32 @@ class ContractsControllerTest < ActionDispatch::IntegrationTest
     get contract_url(contracts(:one))
     assert_response :success
   end
+
+  test "show displays flags section when contract has flags" do
+    contract = contracts(:one)
+    Flag.create!(
+      contract: contract,
+      flag_type: "A2_PUBLICATION_AFTER_CELEBRATION",
+      severity: "high",
+      score: 40,
+      details: { "publication_date" => "2025-01-10", "celebration_date" => "2025-01-08", "rule" => "A2/A3 date sequence anomaly" },
+      fired_at: Time.new(2025, 6, 1, 12, 0, 0)
+    )
+
+    get contract_url(contract)
+    assert_response :success
+    assert_includes response.body, "A2_PUBLICATION_AFTER_CELEBRATION"
+    assert_includes response.body, I18n.t("contracts.show.flags.severity_high")
+    assert_includes response.body, "A2/A3 date sequence anomaly"
+    assert_includes response.body, "2025-06-01"
+  end
+
+  test "show does not display flags section when contract has no flags" do
+    contract = contracts(:two)
+    Flag.where(contract: contract).delete_all
+
+    get contract_url(contract)
+    assert_response :success
+    assert_not_includes response.body, I18n.t("contracts.show.flags.heading")
+  end
 end

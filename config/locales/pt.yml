@@ -123,6 +123,12 @@ pt:
       source:
         heading: "Fonte de Dados"
         synced: "sincronizado %{date}"
+      flags:
+        heading: "Sinalizações de Risco"
+        fired_at: "Detetado"
+        severity_high: "ALTO"
+        severity_medium: "MÉDIO"
+        severity_low: "BAIXO"
 
   locale:
     en: "EN"

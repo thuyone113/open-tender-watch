@@ -102,6 +102,41 @@
         </div>
       <% end %>
 
+      <%# Flags %>
+      <% if @contract.flags.any? %>
+        <div class="bg-white/[0.02] border border-white/[0.06] rounded-lg p-5">
+          <div class="font-mono text-[10px] tracking-[2px] text-white/35 mb-4 uppercase"><%= t("contracts.show.flags.heading") %></div>
+          <div class="space-y-3">
+            <% @contract.flags.order(score: :desc).each do |flag| %>
+              <% severity_color = flag.severity == "high" ? "text-[#ff4444] bg-[#ff44440d] border-[#ff444422]" :
+                                  flag.severity == "medium" ? "text-[#ff8844] bg-[#ff88440d] border-[#ff884422]" :
+                                  "text-[#c8a84e] bg-[#c8a84e0d] border-[#c8a84e22]" %>
+              <div class="border border-white/[0.06] rounded p-3.5 space-y-2">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="font-mono text-xs text-[#e8e0d4] font-semibold"><%= flag.flag_type %></span>
+                  <span class="font-mono text-[10px] px-2 py-0.5 rounded border <%= severity_color %>">
+                    <%= t("contracts.show.flags.severity_#{flag.severity}") %>
+                  </span>
+                </div>
+                <% if flag.details.present? %>
+                  <dl class="space-y-1">
+                    <% flag.details.each do |key, value| %>
+                      <div class="grid grid-cols-[140px_1fr] gap-2">
+                        <dt class="font-mono text-[10px] text-white/30"><%= key %></dt>
+                        <dd class="font-mono text-[10px] text-white/60"><%= value %></dd>
+                      </div>
+                    <% end %>
+                  </dl>
+                <% end %>
+                <div class="font-mono text-[10px] text-white/20">
+                  <%= t("contracts.show.flags.fired_at") %> <%= flag.fired_at&.strftime("%Y-%m-%d") %>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
     </div>
 
     <%# Sidebar %>

@@ -49,6 +49,6 @@ class ContractsController < ApplicationController
   end
 
   def show
-    @contract = Contract.includes(:contracting_entity, :winners, :data_source).find(params[:id])
+    @contract = Contract.includes(:contracting_entity, :winners, :data_source, :flags).find(params[:id])
   end
 end

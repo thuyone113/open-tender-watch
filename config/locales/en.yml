@@ -123,6 +123,12 @@ en:
       source:
         heading: "Data Source"
         synced: "synced %{date}"
+      flags:
+        heading: "Risk Flags"
+        fired_at: "Detected"
+        severity_high: "HIGH"
+        severity_medium: "MEDIUM"
+        severity_low: "LOW"
 
   locale:
     en: "EN"
