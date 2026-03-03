@@ -18,8 +18,12 @@ servers:
 #
 # Note: If using Cloudflare, set encryption mode in SSL/TLS setting to "Full" to enable CF-to-app encryption.
 proxy:
-  ssl: true
-  host: opentenderwatch.com
+  ssl:
+    certificate_pem: KAMAL_SSL_CERTIFICATE_PEM
+    private_key_pem: KAMAL_SSL_PRIVATE_KEY_PEM
+  hosts:
+    - opentenderwatch.com
+    - www.opentenderwatch.com
 
 # Credentials for your image host.
 registry:

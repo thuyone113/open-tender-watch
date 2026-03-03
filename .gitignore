@@ -48,8 +48,9 @@
 /config/master.key
 /config/credentials/*.key
 
-# Ignore Kamal secrets.
+# Ignore Kamal secrets and SSL certs (private keys must never be in git).
 /.kamal/secrets
+/.kamal/certs/
 
 # macOS
 .DS_Store
