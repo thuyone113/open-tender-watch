@@ -449,6 +449,141 @@ class PublicContracts::ImportServiceTest < ActiveSupport::TestCase
     assert ds.reload.error?
   end
 
+  test "call_all delegates to call_streaming when adapter responds to each_contract" do
+    attrs = build_contract_attrs
+    adapter = Object.new
+    each_contract_called = false
+    adapter.define_singleton_method(:each_contract) do |&blk|
+      each_contract_called = true
+      blk.call(attrs)
+    end
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      assert_difference "Contract.count", 1 do
+        PublicContracts::ImportService.new(ds).call_all(progress: nil)
+      end
+    end
+    assert each_contract_called, "expected each_contract to be called"
+  end
+
+  # ── call_streaming ─────────────────────────────────────────────────────
+
+  test "call_streaming imports all contracts yielded by each_contract" do
+    attrs1 = build_contract_attrs("object" => "Serviços de consultoria alfa")
+    attrs2 = build_contract_attrs("object" => "Serviços de consultoria beta")
+    adapter = Object.new
+    adapter.define_singleton_method(:each_contract) { |&blk| [ attrs1, attrs2 ].each { |a| blk.call(a) } }
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      assert_difference "Contract.count", 2 do
+        PublicContracts::ImportService.new(ds).call_streaming(progress: nil)
+      end
+      assert_equal 2, ds.reload.record_count
+      assert ds.active?
+    end
+  end
+
+  test "call_streaming caches entities across rows" do
+    shared_nif = "500099001"
+    attrs1 = build_contract_attrs(
+      "contracting_entity" => { "tax_identifier" => shared_nif, "name" => "Entidade Cache Teste", "is_public_body" => true },
+      "winners" => []
+    )
+    attrs2 = build_contract_attrs(
+      "contracting_entity" => { "tax_identifier" => shared_nif, "name" => "Entidade Cache Teste", "is_public_body" => true },
+      "winners" => []
+    )
+    adapter = Object.new
+    adapter.define_singleton_method(:each_contract) { |&blk| [ attrs1, attrs2 ].each { |a| blk.call(a) } }
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      assert_difference "Entity.count", 1 do
+        PublicContracts::ImportService.new(ds).call_streaming(progress: nil)
+      end
+    end
+  end
+
+  test "call_streaming skips duplicate rows without crashing" do
+    same_attrs = build_contract_attrs("external_id" => "dup-001")
+    adapter = Object.new
+    # yield the same external_id twice (simulates duplicate rows within an XLSX)
+    adapter.define_singleton_method(:each_contract) { |&blk| 2.times { blk.call(same_attrs) } }
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      assert_difference "Contract.count", 1 do
+        PublicContracts::ImportService.new(ds).call_streaming(progress: nil)
+      end
+    end
+  end
+
+  test "call_streaming logs and skips when save! raises RecordInvalid on duplicate" do
+    # To force the RecordInvalid rescue path we stub find_existing_contract to
+    # always return nil, so both rows attempt a fresh insert. The second insert
+    # triggers ActiveRecord's uniqueness validation (it finds the first row that
+    # was committed in the previous savepoint) and raises RecordInvalid.
+    same_attrs = build_contract_attrs("external_id" => "force-skip-001")
+    adapter = Object.new
+    adapter.define_singleton_method(:each_contract) { |&blk| 2.times { blk.call(same_attrs) } }
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      svc = PublicContracts::ImportService.new(ds)
+      # Force find_existing_contract to always return nil on this instance
+      svc.define_singleton_method(:find_existing_contract) { |*_| nil }
+      assert_difference "Contract.count", 1 do
+        svc.call_streaming(batch_size: 10, progress: nil)
+      end
+    end
+  end
+
+  test "call_streaming prints progress including skipped count" do
+    attrs = build_contract_attrs
+    adapter = Object.new
+    adapter.define_singleton_method(:each_contract) { |&blk| blk.call(attrs) }
+    progress = StringIO.new
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      PublicContracts::ImportService.new(ds).call_streaming(progress: progress)
+    end
+    assert_match(/imported/, progress.string)
+    assert_match(/skipped/, progress.string)
+    assert_match(/Done/, progress.string)
+  end
+
+  test "call_streaming uses total_count for progress when available" do
+    attrs = build_contract_attrs
+    adapter = Object.new
+    adapter.define_singleton_method(:total_count) { 42 }
+    adapter.define_singleton_method(:each_contract) { |&blk| blk.call(attrs) }
+    progress = StringIO.new
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      PublicContracts::ImportService.new(ds).call_streaming(progress: progress)
+    end
+    assert_match %r{1/42}, progress.string
+  end
+
+  test "call_streaming raises when adapter lacks each_contract" do
+    adapter = Object.new
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      assert_raises(ArgumentError) do
+        PublicContracts::ImportService.new(ds).call_streaming(progress: nil)
+      end
+    end
+  end
+
+  test "call_streaming sets status to error on unexpected exception" do
+    adapter = Object.new
+    adapter.define_singleton_method(:each_contract) { |&_blk| raise RuntimeError, "disk full" }
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      assert_raises(RuntimeError) do
+        PublicContracts::ImportService.new(ds).call_streaming(progress: nil)
+      end
+    end
+    assert ds.reload.error?
+  end
+
   # ── error handling ─────────────────────────────────────────────────────────
 
   test "call sets status to error when adapter raises" do

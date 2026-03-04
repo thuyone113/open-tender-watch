@@ -288,6 +288,77 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
   end
 
   # ---------------------------------------------------------------------------
+  # each_contract
+  # ---------------------------------------------------------------------------
+
+  test "each_contract yields all rows from every configured year file" do
+    resources = [
+      { "title" => "contratos2024.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2024.xlsx" },
+      { "title" => "contratos2025.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2025.xlsx" }
+    ]
+    rows_2024 = [ { "external_id" => "1" }, { "external_id" => "2" } ]
+    rows_2025 = [ { "external_id" => "3" } ]
+
+    client = PublicContracts::PT::PortalBaseClient.new("years" => [ 2024, 2025 ])
+    client.stub(:fetch_resources, resources) do
+      client.stub(:stream_xlsx_resource, ->(url, &blk) {
+        data = url.include?("2024") ? rows_2024 : rows_2025
+        data.each { |r| blk.call(r) }
+      }) do
+        collected = []
+        client.each_contract { |row| collected << row }
+        assert_equal 3, collected.size
+        assert_equal [ "1", "2", "3" ], collected.map { |r| r["external_id"] }
+      end
+    end
+  end
+
+  test "each_contract skips year files not in config" do
+    resources = [
+      { "title" => "contratos2024.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2024.xlsx" },
+      { "title" => "contratos2023.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2023.xlsx" }
+    ]
+    rows_2024 = [ { "external_id" => "10" } ]
+
+    # @client is configured for 2024 only
+    @client.stub(:fetch_resources, resources) do
+      @client.stub(:stream_xlsx_resource, ->(url, &blk) {
+        rows_2024.each { |r| blk.call(r) } if url.include?("2024")
+      }) do
+        collected = []
+        @client.each_contract { |row| collected << row }
+        assert_equal 1, collected.size
+        assert_equal "10", collected.first["external_id"]
+      end
+    end
+  end
+
+  test "each_contract returns an enumerator when no block given" do
+    @client.stub(:fetch_resources, []) do
+      assert_kind_of Enumerator, @client.each_contract
+    end
+  end
+
+  test "each_contract yields rows in ascending year order" do
+    resources = [
+      { "title" => "contratos2025.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2025.xlsx" },
+      { "title" => "contratos2024.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2024.xlsx" }
+    ]
+    order = []
+    client = PublicContracts::PT::PortalBaseClient.new("years" => [ 2024, 2025 ])
+    client.stub(:fetch_resources, resources) do
+      client.stub(:stream_xlsx_resource, ->(url, &blk) {
+        year = url[/\d{4}/].to_i
+        blk.call({ "external_id" => year.to_s })
+        order << year
+      }) do
+        client.each_contract { |_| }
+      end
+    end
+    assert_equal [ 2024, 2025 ], order
+  end
+
+  # ---------------------------------------------------------------------------
   # total_count
   # ---------------------------------------------------------------------------
 

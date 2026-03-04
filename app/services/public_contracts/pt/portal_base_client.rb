@@ -50,6 +50,23 @@ module PublicContracts
         end
       end
 
+      # Single-pass streaming for bulk imports — downloads each year file exactly
+      # once and yields every normalised contract hash in chronological order.
+      # Unlike the paginated fetch_contracts, this never re-reads a file from the
+      # start. Use this (via call_streaming) for imports; use fetch_contracts only
+      # for targeted single-page fetches or adapters that must paginate.
+      def each_contract
+        return enum_for(:each_contract) unless block_given?
+
+        fetch_resources.sort_by { |r| resource_year(r) || 0 }.each do |res|
+          next unless @years.include?(resource_year(res))
+
+          year = resource_year(res)
+          Rails.logger.info "[PortalBaseClient] Streaming #{year} XLSX from #{res['url']}"
+          stream_xlsx_resource(res["url"]) { |row| yield row }
+        end
+      end
+
       # Streams contracts in batches — never holds the full spreadsheet in RAM.
       # Yields (or returns) one page of BATCH_SIZE normalised hashes at a time.
       def fetch_contracts(page: 1, limit: BATCH_SIZE)

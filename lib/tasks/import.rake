@@ -51,10 +51,22 @@ namespace :import do
 
   desc "Import Portal BASE contracts from dados.gov.pt XLSX (current year by default)"
   task portal_base: :environment do
-    ds = DataSource.find_by!(adapter_class: "PublicContracts::PT::PortalBaseClient")
-    puts "Starting Portal BASE import (year(s): #{ds.adapter.instance_variable_get(:@years).join(', ')})..."
+    ds      = DataSource.find_by!(adapter_class: "PublicContracts::PT::PortalBaseClient")
+    adapter = ds.adapter
+    years   = adapter.instance_variable_get(:@years)
+
+    puts "Starting Portal BASE import (year(s): #{years.join(', ')})..."
     puts "Querying dados.gov.pt for XLSX resources..."
+
+    estimated = adapter.total_count
+    puts "  Estimated rows: ~#{estimated.to_s.reverse.scan(/.{1,3}/).join(',').reverse}"
+    puts "  Mode: #{adapter.respond_to?(:each_contract) ? 'streaming (single-pass, entity-cached)' : 'paginated'}"
+
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     PublicContracts::ImportService.new(ds).call_all
-    puts "Finished. Contracts in DB: #{Contract.where(data_source: ds).count}"
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+
+    count = Contract.where(data_source: ds).count
+    puts "Finished in #{elapsed.round(1)}s. Contracts in DB: #{count.to_s.reverse.scan(/.{1,3}/).join(',').reverse}"
   end
 end

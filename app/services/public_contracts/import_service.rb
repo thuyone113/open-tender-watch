@@ -23,7 +23,16 @@ module PublicContracts
     # The adapter is memoized for the lifetime of this call so that stateful
     # adapters (e.g. TedClient scroll token, SnsClient year-window index) retain
     # their internal position across batches.
+    #
+    # When the adapter responds to #each_contract (e.g. PortalBaseClient), this
+    # method delegates to call_streaming, which is dramatically faster:
+    #   - Each source file downloaded exactly once (vs O(n²) re-downloads with paging)
+    #   - Entities cached in memory (vs a DB round-trip per entity per row)
+    #   - Contracts committed in transactional batches (vs one auto-commit per row)
+    #   - Duplicate rows logged-and-skipped instead of crashing
     def call_all(limit: 100, progress: $stdout)
+      return call_streaming(batch_size: limit, progress: progress) if adapter.respond_to?(:each_contract)
+
       total_known  = adapter.respond_to?(:total_count) ? adapter.total_count : nil
       imported     = 0
       page         = 1
@@ -50,6 +59,65 @@ module PublicContracts
       end
 
       progress&.puts "\n  Done — #{imported} records"
+      @ds.update!(status: :active, last_synced_at: Time.current, record_count: imported)
+    rescue => e
+      @ds.update!(status: :error)
+      raise
+    end
+
+    # Fast bulk import for adapters that support #each_contract.
+    #
+    # Three key optimisations over call_all's pagination loop:
+    #   1. Single pass: each source file is downloaded exactly once. The
+    #      paginated path re-downloads from the beginning on every page call,
+    #      producing O(n²) network traffic for large datasets.
+    #   2. Entity cache: buyer/winner entities are looked up once per unique NIF
+    #      and stored in a Ruby hash. This turns O(contracts) DB round-trips into
+    #      O(unique_entities) — typically a 100-200x reduction.
+    #   3. Batch transactions: contracts are committed in groups of batch_size
+    #      instead of one auto-commit per row. Each row within the batch is
+    #      wrapped in a SAVEPOINT so a duplicate-key error on one row only rolls
+    #      back that row, not the whole batch.
+    def call_streaming(batch_size: 500, progress: $stdout)
+      raise ArgumentError, "#{adapter.class} does not support #each_contract" unless adapter.respond_to?(:each_contract)
+
+      total_known  = adapter.respond_to?(:total_count) ? adapter.total_count : nil
+      imported     = 0
+      skipped      = 0
+      entity_cache = {}
+      queue        = []
+
+      flush = lambda do
+        return if queue.empty?
+
+        ApplicationRecord.transaction do
+          queue.each do |raw|
+            ApplicationRecord.transaction(requires_new: true) do
+              import_contract_cached(raw, entity_cache)
+              imported += 1
+            end
+          rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+            skipped += 1
+            Rails.logger.warn "[ImportService] duplicate skipped (#{adapter.class}): #{e.message.truncate(200)}"
+          end
+        end
+
+        queue.clear
+
+        if progress
+          label = total_known ? "#{imported}/#{total_known}" : imported.to_s
+          progress.print "\r  #{label} imported, #{skipped} skipped"
+          progress.flush
+        end
+      end
+
+      adapter.each_contract do |raw|
+        queue << raw
+        flush.call if queue.size >= batch_size
+      end
+      flush.call
+
+      progress&.puts "\n  Done — #{imported} imported, #{skipped} skipped"
       @ds.update!(status: :active, last_synced_at: Time.current, record_count: imported)
     rescue => e
       @ds.update!(status: :error)
@@ -106,6 +174,47 @@ module PublicContracts
         next unless winner
         ContractWinner.find_or_create_by!(contract: contract, entity: winner)
       end
+    end
+
+    # Like import_contract but resolves entities through an in-memory cache to
+    # avoid a DB round-trip for every entity reference on every row.
+    def import_contract_cached(raw_attrs, entity_cache)
+      attrs = normalize_contract_attrs(raw_attrs)
+      return if attrs["external_id"].blank? || attrs["object"].blank?
+
+      contracting = find_or_create_entity_cached(
+        attrs.dig("contracting_entity", "tax_identifier"),
+        attrs.dig("contracting_entity", "name"),
+        is_public_body: attrs.dig("contracting_entity", "is_public_body") || false,
+        cache: entity_cache
+      )
+      return unless contracting
+
+      winner_tax_ids = Array(attrs["winners"]).filter_map { |w| w["tax_identifier"].presence }
+      contract = find_existing_contract(attrs, contracting, winner_tax_ids) || Contract.new
+      merge_contract_attributes!(contract, attrs, contracting)
+      contract.save! if contract.new_record? || contract.changed?
+
+      Array(attrs["winners"]).each do |winner_attrs|
+        winner = find_or_create_entity_cached(
+          winner_attrs["tax_identifier"],
+          winner_attrs["name"],
+          is_company: winner_attrs["is_company"] || false,
+          cache: entity_cache
+        )
+        next unless winner
+
+        ContractWinner.find_or_create_by!(contract: contract, entity: winner)
+      end
+    end
+
+    # Cache-aware wrapper around find_or_create_entity. Keyed by
+    # "#{tax_id}:#{country_code}" — unique per country scope.
+    def find_or_create_entity_cached(tax_id, name, cache:, is_public_body: false, is_company: false)
+      return nil if tax_id.blank? || name.blank?
+
+      cache_key = "#{tax_id}:#{@ds.country_code}"
+      cache[cache_key] ||= find_or_create_entity(tax_id, name, is_public_body: is_public_body, is_company: is_company)
     end
 
     def find_or_create_entity(tax_id, name, is_public_body: false, is_company: false)
