@@ -52,6 +52,30 @@ module PublicContracts
         end
       end
 
+      # Downloads all configured year XLSX files to the disk cache without
+      # processing any rows. Safe to call multiple times — already-cached files
+      # are skipped. Yields progress lines if a block is given.
+      def prefetch_files
+        resources = fetch_resources.select { |r| @years.include?(resource_year(r)) }
+                                   .sort_by { |r| resource_year(r) || 0 }
+        FileUtils.mkdir_p(CACHE_DIR)
+        resources.each do |res|
+          year   = resource_year(res)
+          cached = cached_xlsx_path(res["url"])
+          if File.exist?(cached)
+            size = (File.size(cached) / 1_048_576.0).round(1)
+            yield "  #{year}: already cached (#{size} MB)" if block_given?
+          else
+            yield "  #{year}: downloading..." if block_given?
+            t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            File.open(cached, "wb") { |f| download_file(res["url"], f) }
+            elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).round(1)
+            size    = (File.size(cached) / 1_048_576.0).round(1)
+            yield "  #{year}: done (#{size} MB in #{elapsed}s)" if block_given?
+          end
+        end
+      end
+
       # Single-pass streaming for bulk imports — downloads each year file exactly
       # once and yields every normalised contract hash in chronological order.
       # Unlike the paginated fetch_contracts, this never re-reads a file from the
@@ -129,7 +153,7 @@ module PublicContracts
         else
           Rails.logger.info "[PortalBaseClient] Cache hit: #{cached}"
         end
-        stream_spreadsheet(cached) { |row| yield row }
+        stream_spreadsheet(cached.to_s) { |row| yield row }
       end
 
       def cached_xlsx_path(url)

@@ -288,6 +288,37 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
   end
 
   # ---------------------------------------------------------------------------
+  # prefetch_files
+  # ---------------------------------------------------------------------------
+
+  test "prefetch_files downloads missing files and skips cached ones" do
+    resources = [
+      { "title" => "contratos2023.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2023.xlsx",
+        "filesize" => 5_242_880 },
+      { "title" => "contratos2024.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2024.xlsx",
+        "filesize" => 3_145_728 }
+    ]
+    client = PublicContracts::PT::PortalBaseClient.new("years" => [ 2023, 2024 ])
+    messages = []
+
+    # 2023: not cached → downloads. 2024: already cached → skip.
+    exist_stub = ->(path) { path.to_s.include?("2024") }
+
+    client.stub(:fetch_resources, resources) do
+      client.stub(:download_file, nil) do
+        File.stub(:exist?, exist_stub) do
+          File.stub(:size, 5_242_880) do
+            client.prefetch_files { |msg| messages << msg }
+          end
+        end
+      end
+    end
+
+    assert messages.any? { |m| m.include?("2023") && m.include?("downloading") }
+    assert messages.any? { |m| m.include?("2024") && m.include?("already cached") }
+  end
+
+  # ---------------------------------------------------------------------------
   # each_contract
   # ---------------------------------------------------------------------------
 

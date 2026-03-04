@@ -55,18 +55,28 @@ namespace :import do
     adapter = ds.adapter
     years   = adapter.instance_variable_get(:@years)
 
-    puts "Starting Portal BASE import (year(s): #{years.join(', ')})..."
-    puts "Querying dados.gov.pt for XLSX resources..."
+    puts "Portal BASE import — #{years.size} year file(s): #{years.join(', ')}"
+    puts
 
+    # Phase 1: download all XLSX files to disk cache
+    puts "Phase 1/2: Downloading XLSX files..."
+    t_dl = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    adapter.prefetch_files { |msg| puts msg }
+    dl_elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t_dl).round(1)
+    puts "  All files ready in #{dl_elapsed}s."
+    puts
+
+    # Phase 2: import from cache
     estimated = adapter.total_count
-    puts "  Estimated rows: ~#{estimated.to_s.reverse.scan(/.{1,3}/).join(',').reverse}"
-    puts "  Mode: #{adapter.respond_to?(:each_contract) ? 'streaming (single-pass, entity-cached)' : 'paginated'}"
+    puts "Phase 2/2: Importing rows from cache..."
+    puts "  Estimated rows : ~#{estimated.to_s.reverse.scan(/.{1,3}/).join(',').reverse}"
+    puts "  Mode           : #{adapter.respond_to?(:each_contract) ? 'streaming (single-pass, entity-cached)' : 'paginated'}"
 
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     PublicContracts::ImportService.new(ds).call_all
-    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+    elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(1)
 
     count = Contract.where(data_source: ds).count
-    puts "Finished in #{elapsed.round(1)}s. Contracts in DB: #{count.to_s.reverse.scan(/.{1,3}/).join(',').reverse}"
+    puts "Finished in #{elapsed}s. Contracts in DB: #{count.to_s.reverse.scan(/.{1,3}/).join(',').reverse}"
   end
 end
