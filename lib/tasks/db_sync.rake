@@ -52,6 +52,11 @@ namespace :db do
         "'docker cp /tmp/opentenderwatch_db_push.sqlite3 #{container_id}:#{PROD_CONTAINER_DB} && " \
         "rm /tmp/opentenderwatch_db_push.sqlite3'")
 
+      # Fix permissions so the rails user inside the container can write to the DB
+      system("ssh root@#{PROD_HOST} " \
+        "'docker exec -u root #{container_id} chown rails:rails #{PROD_CONTAINER_DB} && " \
+        "docker exec -u root #{container_id} chmod 664 #{PROD_CONTAINER_DB}'")
+
       puts "==> Database pushed. Rebooting app..."
       system("bin/kamal app exec --reuse -- 'touch tmp/restart.txt' 2>/dev/null || bin/kamal app boot")
       puts "==> Done. Production database updated."
