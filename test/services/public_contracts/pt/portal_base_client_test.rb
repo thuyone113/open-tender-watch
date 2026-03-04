@@ -291,17 +291,30 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
   # total_count
   # ---------------------------------------------------------------------------
 
-  test "total_count sums rows across configured years" do
+  test "total_count estimates rows from filesize without downloading" do
+    # BYTES_PER_ROW_ESTIMATE = 250; filesize 25_000 → 100 rows
     resources = [ { "title" => "contratos2024.xlsx", "format" => "xlsx",
-                    "url" => "https://example.com/contratos2024.xlsx" } ]
+                    "url"   => "https://example.com/contratos2024.xlsx",
+                    "filesize" => 25_000 } ]
     @client.stub(:fetch_resources, resources) do
-      @client.stub(:count_rows_in_resource, 42) do
-        assert_equal 42, @client.total_count
-      end
+      assert_equal 100, @client.total_count
     end
   end
 
-  test "total_count returns 0 when year not found" do
+  test "total_count ignores years not in config" do
+    resources = [
+      { "title" => "contratos2024.xlsx", "format" => "xlsx",
+        "url" => "https://example.com/contratos2024.xlsx", "filesize" => 25_000 },
+      { "title" => "contratos2023.xlsx", "format" => "xlsx",
+        "url" => "https://example.com/contratos2023.xlsx", "filesize" => 50_000 }
+    ]
+    @client.stub(:fetch_resources, resources) do
+      # @client is configured for 2024 only, so 2023 should not be counted
+      assert_equal 100, @client.total_count
+    end
+  end
+
+  test "total_count returns 0 when no matching year found" do
     @client.stub(:fetch_resources, []) do
       assert_equal 0, @client.total_count
     end

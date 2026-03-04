@@ -401,6 +401,24 @@ class PublicContracts::ImportServiceTest < ActiveSupport::TestCase
     assert_match(/Done/, progress.string)
   end
 
+  test "call_all prints progress without total when adapter has no total_count" do
+    attrs = build_contract_attrs
+    adapter = Object.new
+    call_count = 0
+    # Adapter deliberately does NOT define total_count
+    adapter.define_singleton_method(:fetch_contracts) do |page: 1, limit: 100|
+      call_count += 1
+      call_count == 1 ? [ attrs ] : []
+    end
+    progress = StringIO.new
+    ds = data_sources(:portal_base)
+    ds.stub(:adapter, adapter) do
+      PublicContracts::ImportService.new(ds).call_all(progress: progress)
+    end
+    assert_match(/imported/, progress.string)
+    assert_match(/Done/, progress.string)
+  end
+
   test "call_all sleeps between pages when adapter responds to inter_page_delay" do
     attrs = build_contract_attrs
     adapter = Object.new

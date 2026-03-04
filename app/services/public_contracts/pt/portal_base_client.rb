@@ -25,6 +25,11 @@ module PublicContracts
       # Keeps memory usage bounded — each batch is GC-able after processing.
       BATCH_SIZE = 500
 
+      # Rough estimate of compressed bytes per XLSX row (derived from 2026 sample:
+      # 6.6 MB file → 27,484 rows ≈ 250 bytes/row). Used in total_count to avoid
+      # downloading all files just to count rows.
+      BYTES_PER_ROW_ESTIMATE = 250
+
       def initialize(config = {})
         super(DADOS_GOV_API)
         @years     = Array(config.fetch("years", Time.current.year))
@@ -34,14 +39,14 @@ module PublicContracts
       def country_code = COUNTRY_CODE
       def source_name  = SOURCE_NAME
 
-      # Returns an approximate total by summing last_row across all XLSX files.
-      # Subtract 1 per file for the header row.
+      # Returns an estimated total by summing filesize / BYTES_PER_ROW_ESTIMATE.
+      # This avoids downloading all XLSX files just to count rows — an operation
+      # that would consume ~485 MB of bandwidth and minutes of latency before
+      # the import even starts.
       def total_count
-        resources = fetch_resources
-        @years.sum do |year|
-          res = resources.find { |r| resource_year(r) == year }
-          next 0 unless res
-          count_rows_in_resource(res["url"])
+        fetch_resources.sum do |res|
+          next 0 unless @years.include?(resource_year(res))
+          (res.fetch("filesize", 0).to_i / BYTES_PER_ROW_ESTIMATE).clamp(0, 10_000_000)
         end
       end
 

@@ -39,8 +39,12 @@ module PublicContracts
         # Pace requests for rate-limited adapters (e.g. TED API)
         sleep adapter.inter_page_delay if adapter.respond_to?(:inter_page_delay)
 
-        if progress && total_known
-          progress.print "\r  #{imported}/#{total_known} imported (page #{page - 1})"
+        if progress
+          if total_known
+            progress.print "\r  #{imported}/#{total_known} imported (page #{page - 1})"
+          else
+            progress.print "\r  #{imported} imported (page #{page - 1})"
+          end
           progress.flush
         end
       end
