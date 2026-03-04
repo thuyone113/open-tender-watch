@@ -15,9 +15,11 @@ module PublicContracts
       require "open-uri"
       require "roo"
       require "bigdecimal"
+      require "fileutils"
 
       SOURCE_NAME   = "Portal BASE"
       COUNTRY_CODE  = "PT"
+      CACHE_DIR     = Rails.root.join("tmp", "cache", "portal_base")
       DADOS_GOV_API = "https://dados.gov.pt/api/1"
       DATASET_ID    = "66d72d488ca4b7cb2de28712"
 
@@ -105,22 +107,34 @@ module PublicContracts
       end
 
       def count_rows_in_resource(url)
-        Tempfile.create(["portal_base_count", ".xlsx"], binmode: true) do |tmp|
-          download_file(url, tmp)
-          tmp.flush
-          xlsx = Roo::Spreadsheet.open(tmp.path)
-          return [ xlsx.sheet(0).last_row - 1, 0 ].max
+        cached = cached_xlsx_path(url)
+        FileUtils.mkdir_p(CACHE_DIR)
+        unless File.exist?(cached)
+          File.open(cached, "wb") { |f| download_file(url, f) }
         end
+        xlsx = Roo::Spreadsheet.open(cached)
+        [ xlsx.sheet(0).last_row - 1, 0 ].max
       end
 
       # Streams rows one at a time from an XLSX resource, yielding each
       # normalised contract hash without accumulating all rows in memory.
+      # Downloaded files are cached in tmp/cache/portal_base/ so that
+      # subsequent runs (or restarts) skip the network download entirely.
       def stream_xlsx_resource(url)
-        Tempfile.create(["portal_base", ".xlsx"], binmode: true) do |tmp|
-          download_file(url, tmp)
-          tmp.flush
-          stream_spreadsheet(tmp.path) { |row| yield row }
+        cached = cached_xlsx_path(url)
+        FileUtils.mkdir_p(CACHE_DIR)
+        unless File.exist?(cached)
+          Rails.logger.info "[PortalBaseClient] Downloading #{url}"
+          File.open(cached, "wb") { |f| download_file(url, f) }
+        else
+          Rails.logger.info "[PortalBaseClient] Cache hit: #{cached}"
         end
+        stream_spreadsheet(cached) { |row| yield row }
+      end
+
+      def cached_xlsx_path(url)
+        filename = URI.parse(url).path.split("/").last
+        CACHE_DIR.join(filename)
       end
 
       # rubocop:disable Security/Open
@@ -129,13 +143,19 @@ module PublicContracts
       end
       # rubocop:enable Security/Open
 
+      # Uses Roo's SAX-based each_row_streaming to avoid loading the full
+      # spreadsheet into memory. Roo streams cells one row at a time.
       def stream_spreadsheet(path)
         xlsx    = Roo::Spreadsheet.open(path)
-        sheet   = xlsx.sheet(0)
-        headers = sheet.row(1)
-        (2..sheet.last_row).each do |i|
-          row = normalize_row(headers, sheet.row(i))
-          yield row if row
+        headers = nil
+        xlsx.each_row_streaming(pad_cells: true) do |cells|
+          values = cells.map(&:value)
+          if headers.nil?
+            headers = values
+          else
+            row = normalize_row(headers, values)
+            yield row if row
+          end
         end
       end
 

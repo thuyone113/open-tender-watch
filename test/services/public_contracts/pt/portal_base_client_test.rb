@@ -412,25 +412,24 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
   # ---------------------------------------------------------------------------
 
   test "parse_spreadsheet converts xlsx sheet to contract hashes" do
-    headers   = SAMPLE_ROW.keys
-    row_data  = SAMPLE_ROW.values
+    headers  = SAMPLE_ROW.keys
+    row_data = SAMPLE_ROW.values
 
-    sheet_mock = Minitest::Mock.new
-    sheet_mock.expect(:row, headers, [ 1 ])
-    sheet_mock.expect(:last_row, 2)
-    sheet_mock.expect(:row, row_data, [ 2 ])
+    cell_struct  = Struct.new(:value)
+    header_cells = headers.map { |h| cell_struct.new(h) }
+    data_cells   = row_data.map { |v| cell_struct.new(v) }
 
-    xlsx_mock = Minitest::Mock.new
-    xlsx_mock.expect(:sheet, sheet_mock, [ 0 ])
+    xlsx_obj = Object.new
+    xlsx_obj.define_singleton_method(:each_row_streaming) do |pad_cells: false, &blk|
+      blk.call(header_cells)
+      blk.call(data_cells)
+    end
 
-    Roo::Spreadsheet.stub(:open, xlsx_mock) do
+    Roo::Spreadsheet.stub(:open, xlsx_obj) do
       result = @client.send(:parse_spreadsheet, "/fake/path.xlsx")
       assert_equal 1, result.size
       assert_equal "12345", result[0]["external_id"]
     end
-
-    assert_mock sheet_mock
-    assert_mock xlsx_mock
   end
 
   # ---------------------------------------------------------------------------
@@ -441,9 +440,24 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
     fake_rows = [ { "external_id" => "1" }, { "external_id" => "2" } ]
     collected = []
 
-    @client.stub(:download_file, nil) do
+    File.stub(:exist?, false) do
+      @client.stub(:download_file, nil) do
+        @client.stub(:stream_spreadsheet, ->(path, &blk) { fake_rows.each { |r| blk.call(r) } }) do
+          @client.send(:stream_xlsx_resource, "https://example.com/test.xlsx") { |r| collected << r }
+        end
+      end
+    end
+
+    assert_equal fake_rows, collected
+  end
+
+  test "stream_xlsx_resource uses cached file and skips download when cache exists" do
+    fake_rows = [ { "external_id" => "3" } ]
+    collected = []
+
+    File.stub(:exist?, true) do
       @client.stub(:stream_spreadsheet, ->(path, &blk) { fake_rows.each { |r| blk.call(r) } }) do
-        @client.send(:stream_xlsx_resource, "https://example.com/test.xlsx") { |r| collected << r }
+        @client.send(:stream_xlsx_resource, "https://example.com/contratos2020.xlsx") { |r| collected << r }
       end
     end
 
@@ -461,10 +475,12 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
     xlsx_mock = Minitest::Mock.new
     xlsx_mock.expect(:sheet, sheet_mock, [ 0 ])
 
-    @client.stub(:download_file, nil) do
-      Roo::Spreadsheet.stub(:open, xlsx_mock) do
-        count = @client.send(:count_rows_in_resource, "https://example.com/test.xlsx")
-        assert_equal 50, count
+    File.stub(:exist?, false) do
+      @client.stub(:download_file, nil) do
+        Roo::Spreadsheet.stub(:open, xlsx_mock) do
+          count = @client.send(:count_rows_in_resource, "https://example.com/test.xlsx")
+          assert_equal 50, count
+        end
       end
     end
 
