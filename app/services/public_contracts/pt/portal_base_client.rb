@@ -62,13 +62,14 @@ module PublicContracts
         resources.each do |res|
           year   = resource_year(res)
           cached = cached_xlsx_path(res["url"])
-          if File.exist?(cached)
+          if cached_xlsx_valid?(cached)
             size = (File.size(cached) / 1_048_576.0).round(1)
             yield "  #{year}: already cached (#{size} MB)" if block_given?
           else
+            File.delete(cached) if File.exist?(cached) # remove any partial/0-byte file
             yield "  #{year}: downloading..." if block_given?
             t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            File.open(cached, "wb") { |f| download_file(res["url"], f) }
+            download_with_retry(res["url"], cached)
             elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).round(1)
             size    = (File.size(cached) / 1_048_576.0).round(1)
             yield "  #{year}: done (#{size} MB in #{elapsed}s)" if block_given?
@@ -133,8 +134,9 @@ module PublicContracts
       def count_rows_in_resource(url)
         cached = cached_xlsx_path(url)
         FileUtils.mkdir_p(CACHE_DIR)
-        unless File.exist?(cached)
-          File.open(cached, "wb") { |f| download_file(url, f) }
+        unless cached_xlsx_valid?(cached)
+          File.delete(cached) if File.exist?(cached)
+          download_with_retry(url, cached)
         end
         xlsx = Roo::Spreadsheet.open(cached)
         [ xlsx.sheet(0).last_row - 1, 0 ].max
@@ -147,9 +149,10 @@ module PublicContracts
       def stream_xlsx_resource(url)
         cached = cached_xlsx_path(url)
         FileUtils.mkdir_p(CACHE_DIR)
-        unless File.exist?(cached)
+        unless cached_xlsx_valid?(cached)
+          File.delete(cached) if File.exist?(cached) # remove any partial/0-byte file
           Rails.logger.info "[PortalBaseClient] Downloading #{url}"
-          File.open(cached, "wb") { |f| download_file(url, f) }
+          download_with_retry(url, cached)
         else
           Rails.logger.info "[PortalBaseClient] Cache hit: #{cached}"
         end
@@ -159,6 +162,28 @@ module PublicContracts
       def cached_xlsx_path(url)
         filename = URI.parse(url).path.split("/").last
         CACHE_DIR.join(filename)
+      end
+
+      def cached_xlsx_valid?(path)
+        File.exist?(path) && File.size(path) > 0
+      end
+
+      # Retries up to 3 times on transient network errors, cleaning up any
+      # partial file before each attempt so cache-validity checks stay correct.
+      def download_with_retry(url, dest, attempts: 3)
+        attempts.times do |i|
+          File.open(dest, "wb") { |f| download_file(url, f) }
+          return if cached_xlsx_valid?(dest)
+
+          File.delete(dest) if File.exist?(dest)
+          raise "Empty file after download: #{url}" if i == attempts - 1
+        rescue Errno::ECONNRESET, EOFError, Net::ReadTimeout, OpenURI::HTTPError => e
+          File.delete(dest) if File.exist?(dest)
+          raise if i == attempts - 1
+
+          Rails.logger.warn "[PortalBaseClient] Download error (attempt #{i + 1}): #{e.message} — retrying"
+          sleep(2 ** i) # 1s, 2s back-off
+        end
       end
 
       # rubocop:disable Security/Open

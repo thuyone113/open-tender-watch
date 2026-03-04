@@ -301,12 +301,12 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
     client = PublicContracts::PT::PortalBaseClient.new("years" => [ 2023, 2024 ])
     messages = []
 
-    # 2023: not cached → downloads. 2024: already cached → skip.
-    exist_stub = ->(path) { path.to_s.include?("2024") }
+    # 2023: not valid cached → downloads. 2024: valid cached → skip.
+    valid_stub = ->(path) { path.to_s.include?("2024") }
 
     client.stub(:fetch_resources, resources) do
-      client.stub(:download_file, nil) do
-        File.stub(:exist?, exist_stub) do
+      client.stub(:download_with_retry, nil) do
+        client.stub(:cached_xlsx_valid?, valid_stub) do
           File.stub(:size, 5_242_880) do
             client.prefetch_files { |msg| messages << msg }
           end
@@ -316,6 +316,33 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
 
     assert messages.any? { |m| m.include?("2023") && m.include?("downloading") }
     assert messages.any? { |m| m.include?("2024") && m.include?("already cached") }
+  end
+
+  test "prefetch_files deletes 0-byte file before re-downloading" do
+    resources = [
+      { "title" => "contratos2023.xlsx", "format" => "xlsx", "url" => "https://example.com/contratos2023.xlsx",
+        "filesize" => 0 }
+    ]
+    client   = PublicContracts::PT::PortalBaseClient.new("years" => [ 2023 ])
+    deleted  = []
+    messages = []
+
+    client.stub(:fetch_resources, resources) do
+      client.stub(:download_with_retry, nil) do
+        client.stub(:cached_xlsx_valid?, false) do
+          File.stub(:exist?, true) do
+            File.stub(:delete, ->(p) { deleted << p }) do
+              File.stub(:size, 0) do
+                client.prefetch_files { |msg| messages << msg }
+              end
+            end
+          end
+        end
+      end
+    end
+
+    assert_equal 1, deleted.size, "should delete the 0-byte cached file"
+    assert messages.any? { |m| m.include?("downloading") }
   end
 
   # ---------------------------------------------------------------------------
@@ -423,6 +450,99 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
   end
 
   # ---------------------------------------------------------------------------
+  # cached_xlsx_valid?
+  # ---------------------------------------------------------------------------
+
+  test "cached_xlsx_valid? returns false when file does not exist" do
+    File.stub(:exist?, false) do
+      refute @client.send(:cached_xlsx_valid?, "/tmp/missing.xlsx")
+    end
+  end
+
+  test "cached_xlsx_valid? returns false when file is 0 bytes" do
+    File.stub(:exist?, true) do
+      File.stub(:size, 0) do
+        refute @client.send(:cached_xlsx_valid?, "/tmp/empty.xlsx")
+      end
+    end
+  end
+
+  test "cached_xlsx_valid? returns true when file exists and non-zero" do
+    File.stub(:exist?, true) do
+      File.stub(:size, 1024) do
+        assert @client.send(:cached_xlsx_valid?, "/tmp/good.xlsx")
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # download_with_retry
+  # ---------------------------------------------------------------------------
+
+  test "download_with_retry succeeds on first attempt" do
+    dest = Tempfile.new([ "test", ".xlsx" ])
+    dest.write("data"); dest.flush
+    @client.stub(:download_file, nil) do
+      @client.stub(:cached_xlsx_valid?, true) do
+        assert_nothing_raised { @client.send(:download_with_retry, "https://example.com/x.xlsx", dest.path) }
+      end
+    end
+  ensure
+    dest&.unlink
+  end
+
+  test "download_with_retry retries on ECONNRESET and succeeds" do
+    call_count = 0
+    dest       = "/tmp/retry_test.xlsx"
+    File.delete(dest) if File.exist?(dest)
+
+    flaky_download = lambda do |_url, _file|
+      call_count += 1
+      raise Errno::ECONNRESET, "Connection reset" if call_count < 2
+    end
+
+    @client.stub(:download_file, flaky_download) do
+      @client.stub(:cached_xlsx_valid?, ->(path) { call_count >= 2 }) do
+        @client.send(:download_with_retry, "https://example.com/x.xlsx", dest)
+      end
+    end
+
+    assert_equal 2, call_count, "should retry once after ECONNRESET"
+  ensure
+    File.delete(dest) if File.exist?(dest)
+  end
+
+  test "download_with_retry raises after all attempts exhausted" do
+    always_reset = ->(_url, _file) { raise Errno::ECONNRESET, "reset" }
+
+    @client.stub(:download_file, always_reset) do
+      @client.stub(:cached_xlsx_valid?, false) do
+        File.stub(:exist?, false) do
+          assert_raises(Errno::ECONNRESET) do
+            @client.send(:download_with_retry, "https://example.com/x.xlsx", "/tmp/never.xlsx", attempts: 3)
+          end
+        end
+      end
+    end
+  end
+
+  test "download_with_retry raises RuntimeError when download succeeds but file is empty" do
+    # download_file completes without error but writes nothing (e.g. server returns empty body)
+    @client.stub(:download_file, nil) do
+      @client.stub(:cached_xlsx_valid?, false) do
+        File.stub(:exist?, true) do
+          File.stub(:delete, nil) do
+            err = assert_raises(RuntimeError) do
+              @client.send(:download_with_retry, "https://example.com/x.xlsx", "/tmp/empty.xlsx", attempts: 1)
+            end
+            assert_match(/Empty file after download/, err.message)
+          end
+        end
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # download_file
   # ---------------------------------------------------------------------------
 
@@ -471,8 +591,8 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
     fake_rows = [ { "external_id" => "1" }, { "external_id" => "2" } ]
     collected = []
 
-    File.stub(:exist?, false) do
-      @client.stub(:download_file, nil) do
+    @client.stub(:cached_xlsx_valid?, false) do
+      @client.stub(:download_with_retry, nil) do
         @client.stub(:stream_spreadsheet, ->(path, &blk) { fake_rows.each { |r| blk.call(r) } }) do
           @client.send(:stream_xlsx_resource, "https://example.com/test.xlsx") { |r| collected << r }
         end
@@ -486,7 +606,7 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
     fake_rows = [ { "external_id" => "3" } ]
     collected = []
 
-    File.stub(:exist?, true) do
+    @client.stub(:cached_xlsx_valid?, true) do
       @client.stub(:stream_spreadsheet, ->(path, &blk) { fake_rows.each { |r| blk.call(r) } }) do
         @client.send(:stream_xlsx_resource, "https://example.com/contratos2020.xlsx") { |r| collected << r }
       end
@@ -506,8 +626,8 @@ class PublicContracts::PT::PortalBaseClientTest < ActiveSupport::TestCase
     xlsx_mock = Minitest::Mock.new
     xlsx_mock.expect(:sheet, sheet_mock, [ 0 ])
 
-    File.stub(:exist?, false) do
-      @client.stub(:download_file, nil) do
+    @client.stub(:cached_xlsx_valid?, false) do
+      @client.stub(:download_with_retry, nil) do
         Roo::Spreadsheet.stub(:open, xlsx_mock) do
           count = @client.send(:count_rows_in_resource, "https://example.com/test.xlsx")
           assert_equal 50, count
