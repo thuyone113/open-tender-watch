@@ -1,72 +1,106 @@
 class DashboardController < ApplicationController
   include ActionView::Helpers::NumberHelper
 
-  STATS_CACHE_TTL = 5.minutes
+  STATS_CACHE_TTL    = 5.minutes
+  EXPOSURE_ROW_LIMIT = 200
 
   def index
-    @severity_filter = params[:severity].presence
-    flags_scope = @severity_filter ? Flag.where(severity: @severity_filter) : Flag
+    @severity_filter  = params[:severity].presence
+    @entity_sort      = params[:entity_sort] == "count" ? "count" : "value"
+    @entity_flag_type = params[:entity_flag_type].presence
 
-    # Keep as AR relation (subquery) — avoids loading 37K+ IDs into Ruby memory
-    # and emitting a huge WHERE id IN (1,2,3,...) to SQLite
-    flagged_subquery = flags_scope.select(:contract_id).distinct
-
-    flags_count        = flags_scope.count
-    @flag_types        = Rails.cache.fetch("dashboard/flag_types", expires_in: STATS_CACHE_TTL) { Flag.distinct.order(:flag_type).pluck(:flag_type) }
-    @flags_by_type     = flags_scope.group(:flag_type).order(:flag_type).count
-    @insights_count    = flags_count
-    @entity_sort       = params[:entity_sort] == "count" ? "count" : "value"
-    @entity_flag_type  = params[:entity_flag_type].presence
-    @entity_exposure_rows = entity_exposure_rows(sort_by: @entity_sort, flag_type: @entity_flag_type, severity: @severity_filter)
-
-    # Cache full-table counts — these barely change between page loads
+    # -----------------------------------------------------------------------
+    # Stable counts — almost never change between requests, cache aggressively
+    # -----------------------------------------------------------------------
     contract_count = Rails.cache.fetch("dashboard/contract_count", expires_in: STATS_CACHE_TTL) { Contract.count }
     entity_count   = Rails.cache.fetch("dashboard/entity_count",   expires_in: STATS_CACHE_TTL) { Entity.count }
-
-    @stats = [
-      { label: t("stats.contracts"), value: number_with_delimiter(contract_count), color: "text-[#c8a84e]" },
-      { label: t("stats.entities"),  value: number_with_delimiter(entity_count),   color: "text-[#e8e0d4]" },
-      { label: t("stats.sources"),   value: DataSource.where(status: :active).count.to_s, color: "text-[#e8e0d4]" },
-      { label: t("stats.alerts"),    value: number_with_delimiter(flags_count),    color: "text-[#ff4444]" }
-    ]
 
     source_contract_counts = Rails.cache.fetch("dashboard/source_contract_counts", expires_in: STATS_CACHE_TTL) do
       Contract.where.not(data_source_id: nil).group(:data_source_id).count
     end
 
-    @sources = DataSource.order(:country_code, :name).map do |ds|
+    entity_type_counts = Rails.cache.fetch("dashboard/entity_type_counts", expires_in: STATS_CACHE_TTL) do
+      Entity.group(:is_public_body).count
+    end
+
+    @flag_types = Rails.cache.fetch("dashboard/flag_types", expires_in: STATS_CACHE_TTL) do
+      Flag.distinct.order(:flag_type).pluck(:flag_type)
+    end
+
+    # -----------------------------------------------------------------------
+    # Filter-dependent aggregates — cache per unique param combination.
+    # Default (no filters) is the hot path; still cached like everything else.
+    # -----------------------------------------------------------------------
+    filter_key = "sev:#{@severity_filter}/ft:#{@entity_flag_type}/sort:#{@entity_sort}"
+
+    aggregates = Rails.cache.fetch("dashboard/aggregates/#{filter_key}", expires_in: STATS_CACHE_TTL) do
+      flags_scope      = @severity_filter ? Flag.where(severity: @severity_filter) : Flag
+      flagged_subquery = flags_scope.select(:contract_id).distinct
+
+      flags_count   = flags_scope.count
+      flags_by_type = flags_scope.group(:flag_type).order(:flag_type).count
+
+      flagged_total_exposure = Contract.where(id: flagged_subquery).sum(:base_price)
+      flagged_contract_count = flagged_subquery.count
+
+      flagged_companies_count = Entity
+        .joins(:contract_winners)
+        .where(contract_winners: { contract_id: flagged_subquery })
+        .where(is_company: true)
+        .distinct
+        .count
+
+      flagged_public_entities_count = Contract
+        .where(id: flagged_subquery)
+        .joins(:contracting_entity)
+        .where(entities: { is_public_body: true })
+        .distinct
+        .count(:contracting_entity_id)
+
+      # Materialise the exposure rows into plain hashes so they survive Marshal
+      # serialisation into Solid Cache (AR result objects cannot be marshalled).
+      exposure_rows = entity_exposure_rows(
+        sort_by:   @entity_sort,
+        flag_type: @entity_flag_type,
+        severity:  @severity_filter
+      ).map { |r| { flag_type: r.flag_type, entity_name: r.entity_name,
+                    exposure_value: r.exposure_value, exposure_count: r.exposure_count } }
+
       {
-        name:       ds.name,
-        country:    ds.country_code,
-        type:       ds.source_type.capitalize,
-        status:     ds.status,
-        records:    number_with_delimiter(source_contract_counts.fetch(ds.id, 0)),
-        synced_at:  ds.last_synced_at&.strftime("%Y-%m-%d %H:%M")
+        flags_count:                   flags_count,
+        flags_by_type:                 flags_by_type,
+        flagged_total_exposure:        flagged_total_exposure,
+        flagged_contract_count:        flagged_contract_count,
+        flagged_companies_count:       flagged_companies_count,
+        flagged_public_entities_count: flagged_public_entities_count,
+        exposure_rows:                 exposure_rows
       }
     end
 
-    # All three aggregates use the subquery — SQL decides the join strategy,
-    # no large arrays passed through Ruby
-    @flagged_total_exposure = Contract.where(id: flagged_subquery).sum(:base_price)
-    @flagged_contract_count = flagged_subquery.count
+    @insights_count               = aggregates[:flags_count]
+    @flags_by_type                = aggregates[:flags_by_type]
+    @flagged_total_exposure       = aggregates[:flagged_total_exposure]
+    @flagged_contract_count       = aggregates[:flagged_contract_count]
+    @flagged_companies_count      = aggregates[:flagged_companies_count]
+    @flagged_public_entities_count = aggregates[:flagged_public_entities_count]
+    @entity_exposure_rows         = aggregates[:exposure_rows]
 
-    @flagged_companies_count = Entity
-      .joins(:contract_winners)
-      .where(contract_winners: { contract_id: flagged_subquery })
-      .where(is_company: true)
-      .distinct
-      .count
+    @stats = [
+      { label: t("stats.contracts"), value: number_with_delimiter(contract_count),            color: "text-[#c8a84e]" },
+      { label: t("stats.entities"),  value: number_with_delimiter(entity_count),              color: "text-[#e8e0d4]" },
+      { label: t("stats.sources"),   value: DataSource.where(status: :active).count.to_s,    color: "text-[#e8e0d4]" },
+      { label: t("stats.alerts"),    value: number_with_delimiter(@insights_count),           color: "text-[#ff4444]" }
+    ]
 
-    @flagged_public_entities_count = Contract
-      .where(id: flagged_subquery)
-      .joins(:contracting_entity)
-      .where(entities: { is_public_body: true })
-      .distinct
-      .count(:contracting_entity_id)
-
-    # Single GROUP BY instead of two separate COUNT queries
-    entity_type_counts = Rails.cache.fetch("dashboard/entity_type_counts", expires_in: STATS_CACHE_TTL) do
-      Entity.group(:is_public_body).count
+    @sources = DataSource.order(:country_code, :name).map do |ds|
+      {
+        name:      ds.name,
+        country:   ds.country_code,
+        type:      ds.source_type.capitalize,
+        status:    ds.status,
+        records:   number_with_delimiter(source_contract_counts.fetch(ds.id, 0)),
+        synced_at: ds.last_synced_at&.strftime("%Y-%m-%d %H:%M")
+      }
     end
 
     @crossings = [
@@ -84,11 +118,9 @@ class DashboardController < ApplicationController
     scope = scope.where(flag_type: flag_type) if flag_type.present?
     scope = scope.where(severity: severity) if severity.present?
 
-    order_sql = if sort_by == "count"
-      "exposure_count DESC, exposure_value DESC, entities.name ASC"
-    else
-      "exposure_value DESC, exposure_count DESC, entities.name ASC"
-    end
+    order_sql = sort_by == "count" \
+      ? "exposure_count DESC, exposure_value DESC, entities.name ASC"
+      : "exposure_value DESC, exposure_count DESC, entities.name ASC"
 
     scope.select(
       "flags.flag_type AS flag_type",
@@ -100,6 +132,6 @@ class DashboardController < ApplicationController
       "flags.flag_type, contracts.contracting_entity_id, entities.name"
     ).order(
       Arel.sql(order_sql)
-    )
+    ).limit(EXPOSURE_ROW_LIMIT)
   end
 end
