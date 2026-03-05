@@ -15,7 +15,7 @@
   </header>
 
   <%# Filters %>
-  <%= form_with url: contracts_path, method: :get, local: true, class: "flex flex-wrap gap-2 my-6" do |f| %>
+  <%= form_with url: contracts_path, method: :get, class: "flex flex-wrap gap-2 my-6" do |f| %>
     <div class="flex-1 min-w-[200px]">
       <%= f.text_field :q, value: params[:q], placeholder: t("contracts.index.search_placeholder"),
           class: "w-full bg-white/[0.04] border border-white/[0.1] rounded px-3 py-2 font-mono text-xs text-[#e8e0d4] placeholder-white/20 focus:outline-none focus:border-[#c8a84e55] focus:bg-white/[0.06] transition-all" %>
@@ -78,83 +78,111 @@
 
   <%# Table %>
   <div class="border border-white/[0.08] rounded-lg overflow-hidden">
-    <%# Header row %>
+    <%# Header row — sortable columns %>
     <div class="grid grid-cols-[1fr_180px_140px_120px_90px] bg-white/[0.03] px-5 py-3 border-b border-white/[0.08] font-mono text-[10px] tracking-[2px] text-white/35 uppercase">
-      <span><%= t("contracts.index.col_contract") %></span>
+      <%# Contract title — sortable %>
+      <% obj_dir = (@sort == "object" && @direction == "asc") ? "desc" : "asc" %>
+      <%= link_to contracts_path(request.query_parameters.merge(sort: "object", direction: obj_dir, page: 1)),
+            class: "flex items-center gap-1 transition-colors #{ @sort == 'object' ? 'text-[#c8a84e]' : 'hover:text-white/60' }" do %>
+        <%= t("contracts.index.col_contract") %>
+        <%= @sort == "object" ? (@direction == "asc" ? "↑" : "↓") : raw('<span class="opacity-30">↕</span>') %>
+      <% end %>
       <span><%= t("contracts.index.col_entity") %></span>
       <span><%= t("contracts.index.col_procedure") %></span>
-      <span class="text-right"><%= t("contracts.index.col_price") %></span>
-      <span class="text-right"><%= t("contracts.index.col_date") %></span>
+      <%# Price — sortable %>
+      <% price_dir = (@sort == "price" && @direction == "asc") ? "desc" : "asc" %>
+      <%= link_to contracts_path(request.query_parameters.merge(sort: "price", direction: price_dir, page: 1)),
+            class: "text-right flex items-center justify-end gap-1 transition-colors #{ @sort == 'price' ? 'text-[#c8a84e]' : 'hover:text-white/60' }" do %>
+        <%= t("contracts.index.col_price") %>
+        <%= @sort == "price" ? (@direction == "asc" ? "↑" : "↓") : raw('<span class="opacity-30">↕</span>') %>
+      <% end %>
+      <%# Date — sortable (default) %>
+      <% date_dir = (@sort == "date" && @direction == "asc") ? "desc" : "asc" %>
+      <%= link_to contracts_path(request.query_parameters.merge(sort: "date", direction: date_dir, page: 1)),
+            class: "text-right flex items-center justify-end gap-1 transition-colors #{ @sort == 'date' ? 'text-[#c8a84e]' : 'hover:text-white/60' }" do %>
+        <%= t("contracts.index.col_date") %>
+        <%= @sort == "date" ? (@direction == "asc" ? "↑" : "↓") : raw('<span class="opacity-30">↕</span>') %>
+      <% end %>
     </div>
 
     <% if @contracts.empty? %>
-      <div class="px-5 py-12 text-center font-mono text-sm text-white/25">
-        <%= t("contracts.index.empty") %>
-      </div>
-    <% else %>
-      <% @contracts.each do |contract| %>
-        <%= link_to contract_path(contract), class: "grid grid-cols-[1fr_180px_140px_120px_90px] px-5 py-3.5 border-b border-white/[0.04] last:border-0 hover:bg-white/[0.03] transition-colors group items-start" do %>
-          <div class="pr-4">
-            <div class="text-sm text-[#e8e0d4] group-hover:text-white transition-colors line-clamp-2 leading-snug">
-              <%= contract.object %>
-            </div>
-            <div class="font-mono text-[10px] text-white/25 mt-1">
-              <%= contract.country_code %> · <%= contract.external_id %>
-            </div>
-            <% if contract.flags.any? %>
-              <div class="mt-1.5 flex flex-wrap gap-1">
-                <% contract.flags.first(2).each do |flag| %>
-                  <span class="font-mono text-[9px] tracking-wide text-[#ff6666] bg-[#ff444412] border border-[#ff444433] px-1.5 py-0.5 rounded">
-                    <%= flag.flag_type %>
-                  </span>
-                <% end %>
-                <% if contract.flags.size > 2 %>
-                  <span class="font-mono text-[9px] text-white/35">+<%= contract.flags.size - 2 %></span>
-                <% end %>
+        <div class="px-5 py-12 text-center font-mono text-sm text-white/25">
+          <%= t("contracts.index.empty") %>
+        </div>
+      <% else %>
+        <% @contracts.each do |contract| %>
+          <%= link_to contract_path(contract), class: "flex flex-col sm:grid sm:grid-cols-[1fr_180px_140px_120px_110px] px-4 sm:px-5 py-3 sm:py-3.5 border-b border-white/[0.04] last:border-0 hover:bg-white/[0.03] transition-colors group sm:items-start gap-1 sm:gap-0" do %>
+            <div class="pr-0 sm:pr-4">
+              <div class="text-sm text-[#e8e0d4] group-hover:text-white transition-colors line-clamp-2 leading-snug">
+                <%= contract.object %>
               </div>
-            <% end %>
-          </div>
-          <div class="text-xs text-white/50 truncate pr-4 pt-0.5">
-            <%= contract.contracting_entity&.name %>
-          </div>
-          <div class="pr-4 pt-0.5">
-            <% if contract.procedure_type.present? %>
-              <span class="font-mono text-[10px] text-white/40 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06] leading-tight inline-block">
-                <%= contract.procedure_type.truncate(22) %>
+              <div class="font-mono text-[10px] text-white/25 mt-1">
+                <%= contract.country_code %> · <%= contract.external_id %>
+              </div>
+              <% if contract.flags.any? %>
+                <div class="mt-1.5 flex flex-wrap gap-1">
+                  <% contract.flags.first(2).each do |flag| %>
+                    <span class="font-mono text-[9px] tracking-wide text-[#ff6666] bg-[#ff444412] border border-[#ff444433] px-1.5 py-0.5 rounded">
+                      <%= flag.flag_type %>
+                    </span>
+                  <% end %>
+                  <% if contract.flags.size > 2 %>
+                    <span class="font-mono text-[9px] text-white/35">+<%= contract.flags.size - 2 %></span>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+            <div class="flex items-center gap-2 sm:block text-xs text-white/50">
+              <span class="font-mono text-[10px] text-white/30 sm:hidden"><%= contract.contracting_entity&.name&.truncate(30) %></span>
+              <span class="hidden sm:block truncate pr-4 pt-0.5"><%= contract.contracting_entity&.name %></span>
+              <% if contract.base_price.present? %>
+                <span class="font-mono text-xs text-[#c8a84e] font-medium sm:hidden">
+                  €<%= number_with_delimiter(contract.base_price.to_i) %>
+                </span>
+              <% end %>
+              <span class="font-mono text-[10px] text-white/30 sm:hidden">
+                <%= contract.celebration_date&.strftime("%Y-%m-%d") %>
               </span>
-            <% end %>
-          </div>
-          <div class="text-right font-mono text-xs text-[#c8a84e] font-medium pt-0.5">
-            <% if contract.base_price.present? %>
-              €<%= number_with_delimiter(contract.base_price.to_i) %>
-            <% else %>
-              <span class="text-white/20">—</span>
-            <% end %>
-          </div>
-          <div class="text-right font-mono text-[11px] text-white/35 pt-0.5">
-            <%= contract.celebration_date&.strftime("%Y-%m-%d") || "—" %>
-          </div>
+            </div>
+            <div class="hidden sm:block pr-4 pt-0.5">
+              <% if contract.procedure_type.present? %>
+                <span class="font-mono text-[10px] text-white/40 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06] leading-tight inline-block">
+                  <%= contract.procedure_type.truncate(22) %>
+                </span>
+              <% end %>
+            </div>
+            <div class="hidden sm:block text-right font-mono text-xs text-[#c8a84e] font-medium pt-0.5">
+              <% if contract.base_price.present? %>
+                €<%= number_with_delimiter(contract.base_price.to_i) %>
+              <% else %>
+                <span class="text-white/20">—</span>
+              <% end %>
+            </div>
+            <div class="hidden sm:block text-right font-mono text-[11px] text-white/35 pt-0.5">
+              <%= contract.celebration_date&.strftime("%Y-%m-%d") || "—" %>
+            </div>
+          <% end %>
         <% end %>
       <% end %>
-    <% end %>
-  </div>
+    </div>
 
   <%# Pagination %>
-  <% if @total_pages > 1 %>
-    <div class="flex items-center justify-between mt-6 font-mono text-xs text-white/35">
-      <span>
-        <%= t("contracts.index.pagination.info", page: @page, total_pages: @total_pages, total: number_with_delimiter(@total)) %>
-      </span>
-      <div class="flex gap-2">
-        <% if @page > 1 %>
-          <%= link_to t("contracts.index.pagination.prev"), contracts_path(request.query_parameters.merge(page: @page - 1)),
-              class: "border border-white/10 px-3 py-1.5 rounded hover:border-[#c8a84e44] hover:text-[#c8a84e] transition-all" %>
-        <% end %>
-        <% if @page < @total_pages %>
-          <%= link_to t("contracts.index.pagination.next"), contracts_path(request.query_parameters.merge(page: @page + 1)),
-              class: "border border-white/10 px-3 py-1.5 rounded hover:border-[#c8a84e44] hover:text-[#c8a84e] transition-all" %>
-        <% end %>
+    <% if @total_pages > 1 %>
+      <div class="flex items-center justify-between mt-6 font-mono text-xs text-white/35">
+        <span>
+          <%= t("contracts.index.pagination.info", page: @page, total_pages: @total_pages, total: number_with_delimiter(@total)) %>
+        </span>
+        <div class="flex gap-2">
+          <% if @page > 1 %>
+            <%= link_to t("contracts.index.pagination.prev"), contracts_path(request.query_parameters.merge(page: @page - 1)),
+                class: "border border-white/10 px-3 py-1.5 rounded hover:border-[#c8a84e44] hover:text-[#c8a84e] transition-all" %>
+          <% end %>
+          <% if @page < @total_pages %>
+            <%= link_to t("contracts.index.pagination.next"), contracts_path(request.query_parameters.merge(page: @page + 1)),
+                class: "border border-white/10 px-3 py-1.5 rounded hover:border-[#c8a84e44] hover:text-[#c8a84e] transition-all" %>
+          <% end %>
+        </div>
       </div>
-    </div>
-  <% end %>
+    <% end %>
+  </turbo-frame>
 </div>

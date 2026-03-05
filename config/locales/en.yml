@@ -9,6 +9,8 @@ en:
   nav:
     contracts: "Contracts"
     dashboard: "Dashboard"
+    entities: "Entities"
+    entities: "Entities"
 
   stats:
     contracts: "CONTRACTS"
@@ -46,6 +48,14 @@ en:
       col_value: "EXPOSURE VALUE"
       col_count: "EXPOSURE COUNT"
       empty: "No flagged entities available for this filter."
+      pagination:
+        info: "Page %{page} of %{total_pages} · %{total} entities"
+        prev: "← Prev"
+        next: "Next →"
+      pagination:
+        info: "Page %{page} of %{total_pages} · %{total} entities"
+        prev: "← Prev"
+        next: "Next →"
     severity_filter:
       all: "All"
       high: "High"
@@ -75,9 +85,14 @@ en:
     methodology:
       heading: "Methodology"
       subheading: "How risk scores are determined and what each flag means"
+      approach_label: "APPROACH"
+      track_a: "TRACK A — RULE-BASED FLAGS"
+      track_b: "TRACK B — STATISTICAL FLAGS"
+      track_c: "TRACK C — INTEGRITY & COMPLIANCE"
+      primary_refs: "PRIMARY REFERENCES"
       approach_p1: "Risk indicators follow the OECD framework for detecting corruption and collusion in public procurement. Each flag is independently scored and assigned a confidence level — the score degrades when key fields (NIF, CPV, price, dates) are missing."
       approach_p2: "The system surfaces cases for audit and journalistic review. It does not produce conclusions. All outputs should be treated as leads, not findings."
-      track_b_note: "Track B flags require sufficient data volume (≥ 2 years) and are not yet active."
+      track_b_note: "B5 (Benford's Law) active — entity-level analysis. B1–B4 in development — require minimum 2 years of data volume."
       disclaimer: "Risk scores reflect structural anomalies in procurement data. Missing or inconsistent data is itself a risk signal — it can indicate evasion. Absence of a flag does not mean a contract is clean."
       flags:
         a1_title: "Repeat direct awards"
@@ -106,6 +121,8 @@ en:
         b3_desc: "Price z-score outlier within CPV × region × year peer group"
         b4_title: "Procedural shift"
         b4_desc: "Sudden change in procedure type distribution near budget deadlines"
+        b5_title: "Benford's Law deviation"
+        b5_desc: "Entity's leading-digit chi-square deviates significantly from expected distribution (p<0.05)"
         c1_title: "Missing supplier NIF"
         c1_desc: "Supplier tax identifier absent or invalid — OECD data completeness signal"
         c2_title: "Impossible date sequence"
@@ -186,3 +203,45 @@ en:
   locale:
     en: "EN"
     pt: "PT"
+
+  entities:
+    index:
+      title: "Entities"
+      subtitle:
+        one: "1 entity registered"
+        other: "%{total} entities registered"
+      search_placeholder: "Search entity or NIF…"
+      all_types: "All types"
+      public_only: "Public bodies"
+      private_only: "Private companies"
+      filter: "Filter"
+      clear: "Clear"
+      col_entity: "Entity"
+      col_country: "Country"
+      col_type: "Type"
+      col_contracts: "Contracts"
+      public: "Public"
+      private: "Private"
+      empty: "No entities found."
+      pagination:
+        info: "Page %{page} of %{total_pages} · %{total} entities"
+        prev: "← Prev"
+        next: "Next →"
+    show:
+      back: "← Entities"
+      public_body: "Public Body"
+      private_entity: "Private Entity"
+      company: "Company"
+      overview: "Overview"
+      total_contracts: "Total Contracts"
+      contracts_heading: "Contracts"
+      flags_heading: "Risk Flags"
+      risk_flags: "Risk Flags"
+      sort_by: "Sort by"
+      sort_date: "Date"
+      sort_price: "Price"
+      sort_object: "Description"
+      sort_by: "Sort by"
+      sort_date: "Date"
+      sort_price: "Price"
+      sort_object: "Object"

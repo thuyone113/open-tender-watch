@@ -47,21 +47,25 @@ class Flags::Actions::BenfordLawActionTest < ActiveSupport::TestCase
     end
   end
 
-  test "flags all contracts of entity whose prices strongly deviate from Benford's law" do
+  test "flags ONE representative contract of entity whose prices strongly deviate from Benford's law" do
     # 25 contracts all starting with '9' — chi-square >> 15.507
+    # After the entity-level fix, only the highest-priced contract is flagged.
     contracts = create_contracts(prices: Array.new(25) { |i| 9_000 + i }, prefix: "benford-anomaly")
 
-    assert_difference "Flag.count", 25 do
+    assert_difference "Flag.count", 1 do
       result = Flags::Actions::BenfordLawAction.new.call
-      assert_equal 25, result
+      assert_equal 1, result
     end
 
-    flag = Flag.find_by!(contract_id: contracts.first.id, flag_type: "B5_BENFORD_DEVIATION")
+    flag = Flag.find_by!(flag_type: "B5_BENFORD_DEVIATION")
     chi2 = flag.details["chi2"].to_f
     assert chi2 > 15.507, "Expected chi2 > 15.507, got #{chi2}"
     assert_equal "25",    flag.details["sample_size"]
     assert_includes %w[medium high], flag.severity
     assert flag.score > 0
+    # Flag is on the highest-priced contract
+    max_contract = contracts.max_by(&:base_price)
+    assert_equal max_contract.id, flag.contract_id
   end
 
   test "high severity when chi-square exceeds p=0.01 threshold" do
@@ -99,12 +103,12 @@ class Flags::Actions::BenfordLawActionTest < ActiveSupport::TestCase
 
     action = Flags::Actions::BenfordLawAction.new
 
-    assert_difference "Flag.count", 25 do
-      assert_equal 25, action.call
+    assert_difference "Flag.count", 1 do
+      assert_equal 1, action.call
     end
 
     assert_no_difference "Flag.count" do
-      assert_equal 25, action.call
+      assert_equal 1, action.call
     end
   end
 
@@ -124,7 +128,7 @@ class Flags::Actions::BenfordLawActionTest < ActiveSupport::TestCase
     contracts = create_contracts(prices: Array.new(25) { |i| 8_000 + i }, prefix: "benford-stale")
 
     Flags::Actions::BenfordLawAction.new.call
-    assert_equal 25, Flag.where(flag_type: "B5_BENFORD_DEVIATION").count
+    assert_equal 1, Flag.where(flag_type: "B5_BENFORD_DEVIATION").count
 
     # Remove enough contracts to drop below MIN_SAMPLE
     contracts.last(6).each(&:destroy)
@@ -137,7 +141,7 @@ class Flags::Actions::BenfordLawActionTest < ActiveSupport::TestCase
     contracts = create_contracts(prices: Array.new(25) { |i| 9_000 + i }, prefix: "benford-correct")
 
     Flags::Actions::BenfordLawAction.new.call
-    assert_equal 25, Flag.where(flag_type: "B5_BENFORD_DEVIATION").count
+    assert_equal 1, Flag.where(flag_type: "B5_BENFORD_DEVIATION").count
 
     # Replace all prices with a Benford-following distribution
     contracts.each_with_index do |c, i|
@@ -149,11 +153,11 @@ class Flags::Actions::BenfordLawActionTest < ActiveSupport::TestCase
   end
 
   test "handles multiple entities independently" do
-    # entity(:two)  — anomalous (all 9s)
+    # entity(:two)  — anomalous (all 9s) → 1 flag
     create_contracts(prices: Array.new(25) { |i| 9_000 + i }, prefix: "benford-a", entity: entities(:two))
     # entity(:one) has only 2 fixture contracts (base_price 18000, 25000) → below MIN_SAMPLE; safe
 
-    assert_difference "Flag.count", 25 do
+    assert_difference "Flag.count", 1 do
       Flags::Actions::BenfordLawAction.new.call
     end
   end

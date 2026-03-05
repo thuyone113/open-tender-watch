@@ -1,13 +1,14 @@
 class DashboardController < ApplicationController
   include ActionView::Helpers::NumberHelper
 
-  STATS_CACHE_TTL    = 60.minutes
-  EXPOSURE_ROW_LIMIT = 200
+  STATS_CACHE_TTL   = 60.minutes
+  EXPOSURE_PER_PAGE = 50
 
   def index
     @severity_filter  = params[:severity].presence
     @entity_sort      = params[:entity_sort] == "count" ? "count" : "value"
     @entity_flag_type = params[:entity_flag_type].presence
+    @entity_page      = [ params[:entity_page].to_i, 1 ].max
 
     # -----------------------------------------------------------------------
     # Stable counts — cheap queries, cache generously
@@ -49,10 +50,11 @@ class DashboardController < ApplicationController
     # Entity exposure table — reads from flag_entity_stats (pre-aggregated),
     # never joins the flags table at request time.
     # -----------------------------------------------------------------------
-    @entity_exposure_rows = entity_exposure_rows(
+    @entity_exposure_rows, @entity_total, @entity_total_pages = entity_exposure_rows(
       sort_by:   @entity_sort,
       flag_type: @entity_flag_type,
-      severity:  @severity_filter
+      severity:  @severity_filter,
+      page:      @entity_page
     )
 
     active_sources_count = Rails.cache.fetch("dashboard/active_sources_count", expires_in: STATS_CACHE_TTL) do
@@ -101,24 +103,34 @@ class DashboardController < ApplicationController
   # the unfiltered view shows one row per entity+flag combination (not one per
   # severity). When a severity filter is active, WHERE limits to that severity
   # and the GROUP BY collapses the single matching row.
-  def entity_exposure_rows(sort_by:, flag_type:, severity:)
+  # Returns [rows_array, total_count, total_pages].
+  def entity_exposure_rows(sort_by:, flag_type:, severity:, page:)
     scope = FlagEntityStat.joins(:entity)
     scope = scope.where(flag_type: flag_type) if flag_type.present?
     scope = scope.where(severity:  severity)  if severity.present?
 
     order_col = sort_by == "count" ? "exposure_count" : "exposure_value"
 
-    scope
+    base = scope
       .select(
         "flag_entity_stats.flag_type             AS flag_type",
+        "flag_entity_stats.entity_id             AS entity_id",
         "entities.name                           AS entity_name",
         "SUM(flag_entity_stats.total_exposure)   AS exposure_value",
         "SUM(flag_entity_stats.contract_count)   AS exposure_count"
       )
       .group("flag_entity_stats.flag_type, flag_entity_stats.entity_id, entities.name")
+
+    total  = ApplicationRecord.connection.select_value("SELECT COUNT(*) FROM (#{base.to_sql}) AS sub").to_i
+    pages  = [ (total.to_f / EXPOSURE_PER_PAGE).ceil, 1 ].max
+
+    rows = base
       .order(Arel.sql("#{order_col} DESC, entities.name ASC"))
-      .limit(EXPOSURE_ROW_LIMIT)
-      .map { |r| { flag_type: r.flag_type, entity_name: r.entity_name,
+      .limit(EXPOSURE_PER_PAGE)
+      .offset((page - 1) * EXPOSURE_PER_PAGE)
+      .map { |r| { flag_type: r.flag_type, entity_id: r.entity_id, entity_name: r.entity_name,
                    exposure_value: r.exposure_value.to_f, exposure_count: r.exposure_count.to_i } }
+
+    [ rows, total, pages ]
   end
 end

@@ -5,6 +5,12 @@ class ContractsController < ApplicationController
 
   PER_PAGE = 50
 
+  SORT_COLUMNS = {
+    "date"   => "celebration_date",
+    "price"  => "base_price",
+    "object" => "object"
+  }.freeze
+
   def index
     scope = Contract.includes(:contracting_entity, :winners, :data_source, :flags)
     @selected_source_ids = Array(params[:source_ids]).reject(&:blank?).map(&:to_i).uniq
@@ -43,8 +49,12 @@ class ContractsController < ApplicationController
     @total        = scope.count
     @page         = [ params[:page].to_i, 1 ].max
     @total_pages  = (@total.to_f / PER_PAGE).ceil
-    @contracts    = scope.order(celebration_date: :desc, id: :desc)
-                         .limit(PER_PAGE).offset((@page - 1) * PER_PAGE)
+    @sort         = SORT_COLUMNS.key?(params[:sort]) ? params[:sort] : "date"
+    @direction    = %w[asc desc].include?(params[:direction]) ? params[:direction] : "desc"
+
+    sort_col = SORT_COLUMNS[@sort]
+    @contracts = scope.order(Arel.sql("#{sort_col} #{@direction}, contracts.id DESC"))
+                      .limit(PER_PAGE).offset((@page - 1) * PER_PAGE)
 
     # Cache these filter-dropdown values — they change only on import runs
     @procedure_types = Rails.cache.fetch("contracts/procedure_types", expires_in: 10.minutes) { Contract.distinct.pluck(:procedure_type).compact.sort }

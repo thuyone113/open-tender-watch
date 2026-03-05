@@ -92,13 +92,32 @@ module Flags
         anomalous
       end
 
+      # Returns ONE representative contract per anomalous entity (the one with the
+      # highest base_price).  Benford's Law is a per-entity statistical test — there
+      # is no per-contract finding, so cascading a flag to every contract in the
+      # entity's portfolio produces false positives and inflates the flag count.
       def fetch_contracts_for_entities(entity_ids)
         return [] if entity_ids.empty?
 
-        Contract
-          .where(contracting_entity_id: entity_ids)
-          .where("base_price >= 1")
-          .pluck(:id, :contracting_entity_id, :base_price)
+        safe_ids = entity_ids.map(&:to_i).join(",")
+        sql = <<~SQL
+          SELECT c.id, c.contracting_entity_id, c.base_price
+          FROM contracts c
+          INNER JOIN (
+            SELECT contracting_entity_id, MAX(base_price) AS max_price
+            FROM contracts
+            WHERE contracting_entity_id IN (#{safe_ids})
+              AND base_price >= 1
+            GROUP BY contracting_entity_id
+          ) best
+            ON  best.contracting_entity_id = c.contracting_entity_id
+            AND best.max_price             = c.base_price
+          GROUP BY c.contracting_entity_id
+        SQL
+
+        ApplicationRecord.connection.select_all(sql).map do |r|
+          [ r["id"].to_i, r["contracting_entity_id"].to_i, r["base_price"].to_f ]
+        end
       end
 
       def upsert_flags(flagged_rows, anomalous)
