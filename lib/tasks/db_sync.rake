@@ -35,6 +35,23 @@ namespace :db do
       dev_db = LOCAL_DEV_DB.call
       abort "Development database not found at #{dev_db}" unless File.exist?(dev_db)
 
+      # Force a WAL checkpoint so all pending writes (e.g. flags:aggregate) are
+      # flushed into the main .sqlite3 file before we scp it to production.
+      # Without this, recent writes sitting in the WAL are silently excluded from
+      # the copy and production ends up with stale aggregate stats.
+      puts "==> Checkpointing WAL (flushing pending writes into main DB file)..."
+      conn = ActiveRecord::Base.connection
+      result = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").first
+      busy, log_frames, ckpt_frames = result["busy"], result["log"], result["checkpointed"]
+      remaining = log_frames - ckpt_frames
+      if busy == 1 && remaining > 0
+        warn "WARNING: WAL checkpoint is busy (another reader is active). " \
+             "#{remaining} frames remain in WAL. " \
+             "Close any open Rails consoles/runners then re-run db:sync:push."
+        abort "Aborting to avoid pushing a DB with unflushed WAL data."
+      end
+      puts "  Checkpointed #{ckpt_frames}/#{log_frames} WAL frames."
+
       puts "==> Backing up production database..."
       backup_cmd = "ssh root@#{PROD_HOST} " \
         "'cp #{PROD_DB_PATH} #{PROD_DB_PATH}.bak_#{BACKUP_STAMP.call} 2>/dev/null || true'"

@@ -198,6 +198,36 @@ O adaptador TED requer a variável de ambiente `TED_API_KEY` (registo gratuito e
 2. Escrever testes para os casos de disparo e não disparo.
 3. Adicionar o alerta ao catálogo em `AGENTS.md`.
 
+#### Regenerar pontuações de alerta
+
+Os dados de alerta estão em `flags`, `flag_entity_stats` e `flag_summary_stats`. Regenerar após qualquer alteração de lógica ou de dados.
+
+**Executar sempre em desenvolvimento primeiro, verificar, e só depois sincronizar com produção.**
+
+```bash
+# Regeneração completa (todas as ações + estatísticas) — demora ~15 min
+bundle exec rails flags:run_all
+
+# Ações individuais
+bundle exec rails flags:run_a2          # A2 anomalia de datas
+bundle exec rails flags:run_a9          # A9 anomalia de preços
+bundle exec rails flags:run_a5          # A5 fragmentação de limiar
+bundle exec rails flags:run_a1          # A1 ajuste direto repetido
+bundle exec rails flags:run_b5_benford  # B5 desvio de Benford
+bundle exec rails flags:run_c1          # C1 NIF de adjudicatário em falta
+bundle exec rails flags:run_c3          # C3 campos obrigatórios em falta
+bundle exec rails flags:run_b2          # B2 concentração de fornecedor
+bundle exec rails flags:aggregate       # Reconstruir estatísticas + limpar cache
+```
+
+Após regeneração, sincronizar a base de dados de desenvolvimento com produção:
+
+```bash
+bundle exec rails db:sync:push   # rsync storage/development.sqlite3 → produção
+```
+
+Procedimentos operacionais completos (checklists, verificações, invariantes) estão em `AGENTS.md`, secção **Operational Procedures**.
+
 ---
 
 ### Para jornalistas e investigadores

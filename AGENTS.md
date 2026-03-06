@@ -283,9 +283,110 @@ docs/plans/                        Design docs and implementation plans
 transparencia/                     Legacy Python scripts for data extraction
 ```
 
+## Operational Procedures
+
+### Mandatory workflow: always develop against the development database first
+
+**Never run data-modifying tasks directly on production.** The production SQLite database is a promoted copy of the development database. The workflow is:
+
+```
+1. Make code changes
+2. Run bundle exec rails test   # must pass 100% line coverage
+3. Run the relevant rake task(s) locally against storage/development.sqlite3
+4. Verify results in the development app (http://localhost:3000)
+5. bundle exec rails db:sync:push   # rsync dev DB → production
+6. kamal redeploy (only needed for code changes, not for DB-only syncs)
+```
+
+The `db:sync:push` task rsyncs `storage/development.sqlite3` to the production server and touches `tmp/restart.txt` to reload Puma. Never skip step 3–4: production data state must always be verified in development before promotion.
+
+---
+
+### Flag scoring SOP
+
+Flag scores are stored in the `flags` table and summarised in `flag_entity_stats` and `flag_summary_stats`. They must be regenerated whenever:
+
+- A flag action's logic changes (threshold, severity, score)
+- Import data is substantially updated
+- The `ImportService` normalisation logic changes (e.g. price cap, date parsing)
+
+**Full regeneration (recommended after any flag-logic change):**
+
+```bash
+bundle exec rails flags:run_all
+```
+
+`run_all` executes actions in dependency order then calls `flags:aggregate`. It takes 10–20 minutes on the full dataset.
+
+**Individual flag actions (for targeted reruns):**
+
+```bash
+bundle exec rails flags:run_first_action   # A2 date sequence anomaly
+bundle exec rails flags:run_a2             # alias for run_first_action
+bundle exec rails flags:run_a9             # A9 price anomaly
+bundle exec rails flags:run_a5             # A5 threshold splitting
+bundle exec rails flags:run_a1             # A1 repeat direct award
+bundle exec rails flags:run_b5_benford     # B5 Benford deviation
+bundle exec rails flags:run_c1             # C1 missing winner NIF / zero winners
+bundle exec rails flags:run_c3             # C3 missing mandatory fields
+bundle exec rails flags:run_b2             # B2 supplier concentration
+bundle exec rails flags:aggregate          # rebuild summary stats + clear cache
+```
+
+**After any rerun, check the aggregate output:**
+
+```
+entity stats rows: ~27000
+severity=nil: exposure=~€145B contracts=~1.9M companies=~83K public=~11K
+severity=high: ...
+```
+
+If `exposure=nil: total_exposure=0` then `flags:aggregate` did not find any `FlagEntityStat` rows — check that `run_all` completed without error.
+
+---
+
+### Database sync SOP
+
+```bash
+bundle exec rails db:sync:push    # dev → production (rsync + restart)
+bundle exec rails db:sync:pull    # production → dev  (if it exists)
+```
+
+`db:sync:push` rsyncs `storage/development.sqlite3` (~2.5 GB) to `128.140.78.94:/rails/storage/production.sqlite3` then touches `tmp/restart.txt` in the running container. Expect ~90 seconds upload on a good connection.
+
+**Checklist before pushing:**
+- [ ] `bundle exec rails test` — 457+ tests, 0 failures, 100% line coverage
+- [ ] `bundle exec rails flags:run_all` — completed without error
+- [ ] Dashboard at http://localhost:3000 looks correct (exposure, contract counts)
+- [ ] Commit and push all code changes (`git push`) before syncing the DB
+
+---
+
+### Sense checks after sync
+
+Run the sense check script to verify data integrity in production:
+
+```bash
+ssh root@128.140.78.94 'CNAME=$(docker ps -q -f name=opentenderwatch-web); \
+  docker exec $CNAME bundle exec rails runner /tmp/sense_check.rb'
+```
+
+Key invariants to verify:
+- **No duplicate NIFs** within the same `country_code`
+- **A2 flag rate** ≤ 30% of all contracts (> 50% indicates threshold was dropped)
+- **Total dashboard exposure** €100B–€200B range (outside this range = aggregate bug)
+- **B5 top entity** ≤ €15B (above this = three-tier price fix may have regressed)
+- **Contracts > €1T** = 0 (ImportService must cap `MAX_PLAUSIBLE_PRICE`)
+- **Import freshness** — BASE updated within 7 days, TED/SNS within 14 days
+
+---
+
 ## Key Data Quality Notes
 
 - BASE data quality is the responsibility of contracting entities — treat inconsistencies as risk signals.
 - Entity resolution is mandatory: supplier names vary; always match on NIF where available, then fuzzy name + CPV.
 - Some OECD indicators could not be developed due to data availability — document which flags are constrained.
 - Beneficial ownership linkage is constrained by RCBE access rules and the CJEU ruling — do not assume it can be automated.
+- **A2 minimum gap**: The `DateSequenceAnomalyAction` only fires when `publication_date` is more than `MIN_PUBLICATION_DELAY_DAYS` (currently 10) days after `celebration_date`. Without this threshold, ~85% of BASE contracts fire A2 because signing before publishing is normal in Portugal. Legitimate late-publication risk starts beyond 10 days.
+- **Price cap**: `ImportService` nulls out `base_price` and `total_effective_price` values above `MAX_PLAUSIBLE_PRICE` (€1 trillion). Prices above this threshold are data-entry errors (e.g. price entered in cents, extra zeroes). Any that bypass the cap fire `C3_MISSING_MANDATORY_FIELDS`.
+- **Zero-winner contracts**: ~217K BASE contracts (primarily "Ajuste Direto Regime Geral") have no recorded winner. This is a known BASE data quality pattern where the contracting authority published the notice without completing supplier fields. These are flagged via `C1_MISSING_WINNER_NIF` when `total_effective_price > 0`.

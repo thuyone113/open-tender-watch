@@ -206,6 +206,36 @@ The TED adapter requires a `TED_API_KEY` environment variable (free registration
 2. Write tests covering at minimum: the flag fires on a matching contract, and does not fire on a non-matching one.
 3. Add the flag to the Track A or Track B catalogue in `AGENTS.md`.
 
+#### Regenerating flag scores
+
+Flag data is stored in `flags`, `flag_entity_stats`, and `flag_summary_stats`. Regenerate after any logic or data change.
+
+**Always run in development first, verify, then sync to production.**
+
+```bash
+# Full regeneration (all actions + aggregate stats) — takes ~15 min
+bundle exec rails flags:run_all
+
+# Individual actions
+bundle exec rails flags:run_a2          # A2 date anomaly
+bundle exec rails flags:run_a9          # A9 price anomaly
+bundle exec rails flags:run_a5          # A5 threshold splitting
+bundle exec rails flags:run_a1          # A1 repeat direct award
+bundle exec rails flags:run_b5_benford  # B5 Benford deviation
+bundle exec rails flags:run_c1          # C1 missing winner NIF
+bundle exec rails flags:run_c3          # C3 missing mandatory fields
+bundle exec rails flags:run_b2          # B2 supplier concentration
+bundle exec rails flags:aggregate       # Rebuild summary stats + clear cache
+```
+
+After regeneration, push the development database to production:
+
+```bash
+bundle exec rails db:sync:push   # rsync storage/development.sqlite3 → production
+```
+
+Full operational procedures (checklists, sense checks, invariants) are in `AGENTS.md` under **Operational Procedures**.
+
 ---
 
 ### For journalists and researchers
