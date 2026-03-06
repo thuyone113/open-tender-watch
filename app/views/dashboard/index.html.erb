@@ -60,11 +60,11 @@
       <div class="font-mono text-[10px] tracking-[3px] text-[#c8a84e] mb-1">
         <%= t("dashboard.exposure.label") %>
       </div>
-      <div class="flex justify-between items-baseline">
-        <span class="font-['Space_Grotesk'] text-3xl sm:text-5xl font-bold text-[#e8e0d4] tracking-tighter">
+      <div class="flex flex-col sm:flex-row sm:justify-between sm:items-baseline gap-3">
+        <span class="font-['Space_Grotesk'] text-2xl sm:text-5xl font-bold text-[#e8e0d4] tracking-tight sm:tracking-tighter break-all">
           <%= number_to_currency(@flagged_total_exposure || 0, unit: "€", delimiter: ",", separator: ".", format: "%u%n", precision: 2) %>
         </span>
-        <div class="text-right font-mono text-sm">
+        <div class="font-mono text-sm sm:text-right">
           <div class="text-white/50"><%= t("dashboard.exposure.contracts", count: @flagged_contract_count) %></div>
           <div class="text-white/35"><%= t("dashboard.exposure.companies", count: @flagged_companies_count) %></div>
           <div class="text-white/35"><%= t("dashboard.exposure.public_entities", count: @flagged_public_entities_count) %></div>

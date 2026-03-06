@@ -67,7 +67,7 @@
                width="20" height="15"
                alt="<%= locale_code.upcase %>"
                class="rounded-xs">
-          <span class="font-mono text-[10px] tracking-widest <%= active ? 'text-[#c8a84e]' : 'text-white/40' %>">
+          <span class="hidden sm:inline font-mono text-[10px] tracking-widest <%= active ? 'text-[#c8a84e]' : 'text-white/40' %>">
             <%= t("locale.#{locale_code}") %>
           </span>
         <% end %>

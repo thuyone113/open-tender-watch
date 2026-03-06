@@ -79,7 +79,7 @@
   <%# Table %>
   <div class="border border-white/[0.08] rounded-lg overflow-hidden">
     <%# Header row — sortable columns %>
-    <div class="grid grid-cols-[1fr_180px_140px_120px_90px] bg-white/[0.03] px-5 py-3 border-b border-white/[0.08] font-mono text-[10px] tracking-[2px] text-white/35 uppercase">
+    <div class="hidden sm:grid grid-cols-[1fr_180px_140px_120px_90px] bg-white/[0.03] px-5 py-3 border-b border-white/[0.08] font-mono text-[10px] tracking-[2px] text-white/35 uppercase">
       <%# Contract title — sortable %>
       <% obj_dir = (@sort == "object" && @direction == "asc") ? "desc" : "asc" %>
       <%= link_to contracts_path(request.query_parameters.merge(sort: "object", direction: obj_dir, page: 1)),

@@ -55,7 +55,7 @@
       <%= turbo_frame_tag "entity-contracts" do %>
         <div class="border border-white/[0.08] rounded-lg overflow-hidden">
           <%# Header row %>
-          <div class="grid grid-cols-[1fr_140px_100px_90px] bg-white/[0.03] px-4 py-3 border-b border-white/[0.08] font-mono text-[10px] tracking-[2px] text-white/35 uppercase">
+          <div class="hidden sm:grid grid-cols-[1fr_140px_100px_90px] bg-white/[0.03] px-4 py-3 border-b border-white/[0.08] font-mono text-[10px] tracking-[2px] text-white/35 uppercase">
             <span><%= t("contracts.index.col_contract") %></span>
             <span><%= t("contracts.index.col_procedure") %></span>
             <span class="text-right"><%= t("contracts.index.col_price") %></span>
@@ -68,8 +68,8 @@
             </div>
           <% else %>
             <% @contracts.each do |contract| %>
-              <%= link_to contract_path(contract), class: "grid grid-cols-[1fr_140px_100px_90px] px-4 py-3 border-b border-white/[0.04] last:border-0 hover:bg-white/[0.03] transition-colors group items-start", data: { turbo_frame: "_top" } do %>
-                <div class="pr-4">
+              <%= link_to contract_path(contract), class: "flex flex-col sm:grid sm:grid-cols-[1fr_140px_100px_90px] px-4 py-3 border-b border-white/[0.04] last:border-0 hover:bg-white/[0.03] transition-colors group sm:items-start gap-1 sm:gap-0", data: { turbo_frame: "_top" } do %>
+                <div class="pr-0 sm:pr-4">
                   <div class="text-sm text-[#e8e0d4] group-hover:text-white transition-colors line-clamp-2 leading-snug">
                     <%= contract.object %>
                   </div>
@@ -89,21 +89,29 @@
                     </div>
                   <% end %>
                 </div>
-                <div class="pr-3 pt-0.5">
+                <div class="flex items-center gap-2 sm:block">
                   <% if contract.procedure_type.present? %>
-                    <span class="font-mono text-[10px] text-white/40 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06] leading-tight inline-block">
+                    <span class="font-mono text-[10px] text-white/40 bg-white/[0.04] px-2 py-0.5 rounded border border-white/[0.06] leading-tight inline-block sm:mt-0.5">
                       <%= contract.procedure_type.truncate(20) %>
                     </span>
                   <% end %>
+                  <% if contract.base_price.present? %>
+                    <span class="font-mono text-xs text-[#c8a84e] font-medium sm:hidden">
+                      €<%= number_with_delimiter(contract.base_price.to_i) %>
+                    </span>
+                  <% end %>
+                  <span class="font-mono text-[10px] text-white/30 sm:hidden">
+                    <%= contract.celebration_date&.strftime("%Y-%m-%d") %>
+                  </span>
                 </div>
-                <div class="text-right font-mono text-xs text-[#c8a84e] font-medium pt-0.5">
+                <div class="hidden sm:block text-right font-mono text-xs text-[#c8a84e] font-medium pt-0.5">
                   <% if contract.base_price.present? %>
                     €<%= number_with_delimiter(contract.base_price.to_i) %>
                   <% else %>
                     <span class="text-white/20">—</span>
                   <% end %>
                 </div>
-                <div class="text-right font-mono text-[11px] text-white/35 pt-0.5">
+                <div class="hidden sm:block text-right font-mono text-[11px] text-white/35 pt-0.5">
                   <%= contract.celebration_date&.strftime("%Y-%m-%d") || "—" %>
                 </div>
               <% end %>

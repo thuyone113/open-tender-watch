@@ -22,7 +22,7 @@
     </div>
   </header>
 
-  <div class="grid grid-cols-[1fr_280px] gap-6 mt-6">
+  <div class="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6 mt-6">
 
     <%# Main column %>
     <div class="space-y-5">
@@ -30,7 +30,7 @@
       <%# Price card %>
       <div class="bg-white/[0.02] border border-white/[0.06] rounded-lg p-5">
         <div class="font-mono text-[10px] tracking-[2px] text-white/35 mb-4 uppercase"><%= t("contracts.show.price.heading") %></div>
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <div class="font-mono text-[10px] text-white/30 mb-1"><%= t("contracts.show.price.base") %></div>
             <div class="font-['Space_Grotesk'] text-2xl font-bold text-[#c8a84e]">
@@ -72,7 +72,7 @@
             t("contracts.show.details.cpv_code")      => @contract.cpv_code,
             t("contracts.show.details.location")      => @contract.location,
           }.each do |label, value| %>
-            <div class="grid grid-cols-[160px_1fr] gap-3 items-baseline">
+            <div class="grid grid-cols-[100px_1fr] sm:grid-cols-[160px_1fr] gap-2 sm:gap-3 items-baseline">
               <dt class="font-mono text-[11px] text-white/30"><%= label %></dt>
               <dd class="text-sm text-[#e8e0d4]"><%= value.presence || "—" %></dd>
             </div>
@@ -183,7 +183,7 @@
             <% if flag.details.present? %>
               <dl class="space-y-1">
                 <% flag.details.each do |key, value| %>
-                  <div class="grid grid-cols-[160px_1fr] gap-2">
+                  <div class="grid grid-cols-[100px_1fr] sm:grid-cols-[160px_1fr] gap-2">
                     <dt class="font-mono text-[10px] text-white/30"><%= key %></dt>
                     <dd class="font-mono text-[10px] text-white/60 break-all"><%= value.is_a?(Hash) ? value.map { |k,v| "#{k}: #{v}" }.join(", ") : value %></dd>
                   </div>
