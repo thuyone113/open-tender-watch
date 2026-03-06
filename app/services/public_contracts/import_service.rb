@@ -184,17 +184,31 @@ module PublicContracts
       return nil if tax_id.blank? || name.blank?
 
       cache_key = "#{tax_id}:#{@ds.country_code}"
-      cache[cache_key] ||= find_or_create_entity(tax_id, name, is_public_body: is_public_body, is_company: is_company)
+      entity = cache[cache_key] ||= find_or_create_entity(tax_id, name, is_public_body: is_public_body, is_company: is_company)
+      # Apply additive flag upgrades even on a cache hit (e.g. entity first cached
+      # as a winner with is_company=true, then encountered as a contracting entity
+      # with is_public_body=true within the same import run).
+      if entity && ((is_public_body && !entity.is_public_body) || (is_company && !entity.is_company))
+        entity.is_public_body = true if is_public_body
+        entity.is_company     = true if is_company
+        entity.save!
+      end
+      entity
     end
 
     def find_or_create_entity(tax_id, name, is_public_body: false, is_company: false)
       return nil if tax_id.blank? || name.blank?
 
-      Entity.find_or_create_by!(tax_identifier: tax_id, country_code: @ds.country_code) do |e|
-        e.name          = name
-        e.is_public_body = is_public_body
-        e.is_company    = is_company
-      end
+      entity = Entity.find_or_initialize_by(tax_identifier: tax_id, country_code: @ds.country_code)
+      entity.name = name if entity.new_record? || entity.name.blank?
+      # Flags are additive: once true, never reset to false.
+      # This ensures an entity first seen as a winner (is_company=true) is
+      # correctly upgraded to is_public_body=true when later seen as a
+      # contracting entity, without losing either classification.
+      entity.is_public_body = true if is_public_body
+      entity.is_company     = true if is_company
+      entity.save! if entity.new_record? || entity.changed?
+      entity
     end
 
     def normalize_contract_attrs(attrs)
