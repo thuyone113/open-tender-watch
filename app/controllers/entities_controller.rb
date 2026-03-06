@@ -49,8 +49,15 @@ class EntitiesController < ApplicationController
     base_scope = @entity.contracts_as_contracting_entity
     @entity_contract_total = base_scope.count
 
+    # Use a subquery for flag filtering to avoid DISTINCT + includes slowness.
+    # JOIN + DISTINCT forces Rails into a slow subquery strategy when combined
+    # with includes; a correlated subquery lets the planner use the
+    # index_flags_on_contract_id_and_flag_type index efficiently.
     if @flag_filter.present?
-      base_scope = base_scope.joins(:flags).where(flags: { flag_type: @flag_filter }).distinct
+      base_scope = base_scope.where(
+        "contracts.id IN (SELECT contract_id FROM flags WHERE flag_type = ?)",
+        @flag_filter
+      )
     end
 
     @date_from = params[:date_from].presence
@@ -73,8 +80,11 @@ class EntitiesController < ApplicationController
 
     order_sql = "#{Contract.table_name}.#{@sort_col} #{@sort_dir}, #{Contract.table_name}.id #{@sort_dir}"
 
+    # Use preload instead of includes to fire separate queries per association,
+    # avoiding the "eager load + large WHERE IN" strategy that Rails picks when
+    # it can't determine the final SQL at planning time.
     @contracts = base_scope
-      .includes(:winners, :data_source, :flags)
+      .preload(:winners, :data_source, :flags)
       .order(Arel.sql(order_sql))
       .limit(PER_PAGE)
       .offset((@page - 1) * PER_PAGE)
