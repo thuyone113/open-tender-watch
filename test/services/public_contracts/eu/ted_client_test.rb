@@ -4,6 +4,7 @@ class PublicContracts::EU::TedClientTest < ActiveSupport::TestCase
   FULL_NOTICE = {
     "publication-number"         => "2026/S001-001",
     "publication-date"           => "2026-01-15Z",
+    "notice-type"                => "cn-standard",
     "notice-title"               => { "eng" => "Supply of surgical equipment", "por" => "Fornecimento de equipamento cirúrgico" },
     "organisation-country-buyer" => [ "PRT" ],
     "organisation-name-buyer"    => { "eng" => [ "Centro Hospitalar Lisboa Norte" ] },
@@ -290,6 +291,47 @@ class PublicContracts::EU::TedClientTest < ActiveSupport::TestCase
       assert_equal [], result.first["winners"]
     end
     mock.verify
+  end
+
+  test "normalize returns nil for corrigendum notice type" do
+    mock = mock_http_post(fake_success({ "notices" => [ FULL_NOTICE.merge("notice-type" => "cor") ], "totalNoticeCount" => 1 }.to_json))
+    Net::HTTP.stub(:new, mock) do
+      result = @client.fetch_contracts
+      assert_equal [], result
+    end
+    mock.verify
+  end
+
+  test "normalize returns nil for can-modifies notice type" do
+    mock = mock_http_post(fake_success({ "notices" => [ FULL_NOTICE.merge("notice-type" => "can-modifies") ], "totalNoticeCount" => 1 }.to_json))
+    Net::HTTP.stub(:new, mock) do
+      result = @client.fetch_contracts
+      assert_equal [], result
+    end
+    mock.verify
+  end
+
+  test "fetch_contracts compacts skipped notice types" do
+    cn_notice  = FULL_NOTICE
+    cor_notice = FULL_NOTICE.merge("notice-type" => "cor", "publication-number" => "2026/S001-002")
+    payload    = { "notices" => [ cn_notice, cor_notice ], "totalNoticeCount" => 2 }.to_json
+    mock = mock_http_post(fake_success(payload))
+    Net::HTTP.stub(:new, mock) do
+      result = @client.fetch_contracts
+      assert_equal 1, result.length
+      assert_equal "2026/S001-001", result.first["external_id"]
+    end
+    mock.verify
+  end
+
+  test "extract_title strips leading country segment from TED title" do
+    title_with_country = { "eng" => "Portugal \u2013 Computer support services \u2013 Actual contract title" }
+    assert_equal "Computer support services \u2013 Actual contract title", @client.send(:extract_title, title_with_country)
+  end
+
+  test "extract_title returns title unchanged when no en-dash separator" do
+    titles = { "eng" => "Supply of surgical equipment" }
+    assert_equal "Supply of surgical equipment", @client.send(:extract_title, titles)
   end
 
   test "extract_title returns nil for non-hash input" do

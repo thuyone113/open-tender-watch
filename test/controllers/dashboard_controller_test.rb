@@ -65,7 +65,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     get dashboard_index_url
     assert_response :success
     assert_includes response.body, contract.contracting_entity.name
-    assert_includes response.body, "A2 PUBLICATION AFTER CELEBRATION"
+    assert_includes response.body, "Late Publication"
     assert_not_includes response.body, "Auto-direcionamento de emendas"
   end
 

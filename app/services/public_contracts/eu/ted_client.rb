@@ -15,6 +15,7 @@ module PublicContracts
       DEFAULT_FIELDS = %w[
         publication-number
         publication-date
+        notice-type
         notice-title
         organisation-country-buyer
         organisation-name-buyer
@@ -24,6 +25,10 @@ module PublicContracts
         main-classification-proc
         BT-5071-Procedure
       ].freeze
+
+      # Notice types that are amendments or corrections to existing notices
+      # and should not be imported as new contracts.
+      SKIP_NOTICE_TYPES = %w[cor can-modifies].freeze
 
       # Maps TED ISO 3166-1 alpha-3 codes to alpha-2 used by the domain model
       COUNTRY_MAP = { "PRT" => "PT", "ESP" => "ES", "FRA" => "FR", "DEU" => "DE" }.freeze
@@ -93,7 +98,7 @@ module PublicContracts
         @scroll_token     = result["iterationNextToken"]
         @scroll_exhausted = @scroll_token.nil?
 
-        notices.map { |notice| normalize(notice) }
+        notices.filter_map { |notice| normalize(notice) }
       end
 
       def total_count
@@ -113,6 +118,9 @@ module PublicContracts
       #   organisation-country-buyer → ["PRT"]
       #   notice-title              → {"eng" => "Portugal – ...", "por" => "...", ...}
       def normalize(notice)
+        notice_type = notice["notice-type"].to_s.downcase
+        return nil if SKIP_NOTICE_TYPES.include?(notice_type)
+
         buyer_name = extract_buyer_name(notice["organisation-name-buyer"])
         buyer_id   = "TED-#{Digest::MD5.hexdigest(buyer_name.downcase.strip)[0, 12]}"
         alpha3     = Array(notice["organisation-country-buyer"]).first.to_s
@@ -146,9 +154,15 @@ module PublicContracts
 
       # notice-title is {"eng" => "...", "por" => "...", ...}. Prefer English,
       # fall back to Portuguese, then first available language.
+      # TED prepends the country name(s) to the title, e.g.:
+      #   "Portugal \u2013 CPV description \u2013 Actual contract title"
+      # We strip the leading country segment (everything before the first \u2013).
       def extract_title(field)
         return nil unless field.is_a?(Hash)
-        field["eng"] || field["por"] || field.values.first
+        title = field["eng"] || field["por"] || field.values.first
+        return title unless title.is_a?(String) && title.include?(" \u2013 ")
+        parts = title.split(" \u2013 ")
+        parts.length > 1 ? parts.drop(1).join(" \u2013 ") : title
       end
 
       def post(path, body, attempt: 1)
