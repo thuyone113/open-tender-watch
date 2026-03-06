@@ -29,11 +29,18 @@ module Flags
     # We therefore use benford_analyses.sample_size as contract_count and
     # entities.total_contracted_value as total_exposure for B5 rows, and handle
     # all other flags with the standard contract-level aggregation.
+    #
+    # Three-tier price logic — see flags.rake price_case for explanation.
     def aggregate_entity_stats(conn, now)
       conn.execute("DELETE FROM flag_entity_stats")
 
       # Standard flags — one flag row maps to one contract.
       conn.execute(<<~SQL)
+        WITH winner_counts AS (
+          SELECT contract_id, COUNT(*) AS cnt
+          FROM contract_winners
+          GROUP BY contract_id
+        )
         INSERT INTO flag_entity_stats
           (entity_id, flag_type, severity, total_exposure, contract_count,
            computed_at, created_at, updated_at)
@@ -41,11 +48,18 @@ module Flags
           c.contracting_entity_id        AS entity_id,
           f.flag_type,
           f.severity,
-          COALESCE(SUM(c.base_price), 0) AS total_exposure,
+          COALESCE(SUM(
+            CASE
+              WHEN c.total_effective_price > 0 THEN c.total_effective_price
+              WHEN wc.cnt IS NOT NULL           THEN c.base_price / wc.cnt
+              ELSE 0
+            END
+          ), 0) AS total_exposure,
           COUNT(*)                        AS contract_count,
           '#{now}', '#{now}', '#{now}'
         FROM flags f
         JOIN contracts c ON c.id = f.contract_id
+        LEFT JOIN winner_counts wc ON wc.contract_id = c.id
         WHERE f.flag_type != 'B5_BENFORD_DEVIATION'
         GROUP BY c.contracting_entity_id, f.flag_type, f.severity
       SQL
@@ -82,8 +96,20 @@ module Flags
         sev_val   = conn.quote(sev)
 
         total_exposure = conn.select_value(<<~SQL).to_f
-          SELECT COALESCE(SUM(c.base_price), 0)
+          WITH winner_counts AS (
+            SELECT contract_id, COUNT(*) AS cnt
+            FROM contract_winners
+            GROUP BY contract_id
+          )
+          SELECT COALESCE(SUM(
+            CASE
+              WHEN c.total_effective_price > 0 THEN c.total_effective_price
+              WHEN wc.cnt IS NOT NULL           THEN c.base_price / wc.cnt
+              ELSE 0
+            END
+          ), 0)
           FROM contracts c
+          LEFT JOIN winner_counts wc ON wc.contract_id = c.id
           WHERE c.id IN (SELECT DISTINCT f.contract_id FROM flags f #{sev_where})
         SQL
 

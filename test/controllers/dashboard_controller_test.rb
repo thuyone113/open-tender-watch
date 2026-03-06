@@ -21,13 +21,14 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
     )
   end
 
-  def create_flagged_contract!(external_id:, object:, flag_type:, base_price: 2500, contracting_entity: entities(:one), winners: [])
+  def create_flagged_contract!(external_id:, object:, flag_type:, base_price: 2500, total_effective_price: nil, contracting_entity: entities(:one), winners: [])
     contract = Contract.create!(
       external_id: external_id,
       country_code: "PT",
       object: object,
       procedure_type: "Ajuste Direto",
       base_price: base_price,
+      total_effective_price: total_effective_price || base_price,
       publication_date: Date.new(2025, 1, 10),
       celebration_date: Date.new(2025, 1, 8),
       contracting_entity: contracting_entity,
@@ -191,6 +192,7 @@ class DashboardControllerTest < ActionDispatch::IntegrationTest
       object: "Medium Severity Contract",
       procedure_type: "Ajuste Direto",
       base_price: 3000,
+      total_effective_price: 3000,
       publication_date: Date.new(2025, 1, 10),
       celebration_date: Date.new(2025, 1, 8),
       contracting_entity: entity,

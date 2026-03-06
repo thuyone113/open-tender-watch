@@ -59,10 +59,21 @@ namespace :flags do
     conn = ActiveRecord::Base.connection
     now  = Time.current.utc.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Use total_effective_price (actual awarded value) where available; fall back
-    # to base_price only when null/zero.  base_price is the framework envelope
-    # ceiling and can be wildly inflated (e.g. €147B for a single drug purchase).
-    price_expr = "COALESCE(NULLIF(c.total_effective_price, 0), c.base_price)"
+    # Three-tier price logic to prevent framework envelope inflation:
+    #   1. Use total_effective_price when available (actual awarded value).
+    #   2. When missing, divide base_price by winner count (each winner's share
+    #      of the framework ceiling).
+    #   3. When no winners either, use 0 (unawarded/framework agreement —
+    #      no money has changed hands yet).
+    # base_price alone is the framework envelope ceiling and is wildly inflated
+    # when repeated across N suppliers (e.g. €147B for a drug purchase).
+    price_case = <<~EXPR.squish
+      CASE
+        WHEN c.total_effective_price > 0 THEN c.total_effective_price
+        WHEN wc.cnt IS NOT NULL           THEN c.base_price / wc.cnt
+        ELSE 0
+      END
+    EXPR
 
     conn.transaction do
       # -----------------------------------------------------------------------
@@ -74,6 +85,11 @@ namespace :flags do
 
       # Standard flags — B5 Benford is handled separately below.
       conn.execute(<<~SQL)
+        WITH winner_counts AS (
+          SELECT contract_id, COUNT(*) AS cnt
+          FROM contract_winners
+          GROUP BY contract_id
+        )
         INSERT INTO flag_entity_stats
           (entity_id, flag_type, severity, total_exposure, contract_count,
            computed_at, created_at, updated_at)
@@ -81,11 +97,12 @@ namespace :flags do
           c.contracting_entity_id                          AS entity_id,
           f.flag_type,
           f.severity,
-          COALESCE(SUM(#{price_expr}), 0)                  AS total_exposure,
+          COALESCE(SUM(#{price_case}), 0)                  AS total_exposure,
           COUNT(DISTINCT f.contract_id)                    AS contract_count,
           '#{now}', '#{now}', '#{now}'
         FROM (SELECT DISTINCT contract_id, flag_type, severity FROM flags) f
         JOIN contracts c ON c.id = f.contract_id
+        LEFT JOIN winner_counts wc ON wc.contract_id = c.id
         WHERE f.flag_type != 'B5_BENFORD_DEVIATION'
         GROUP BY c.contracting_entity_id, f.flag_type, f.severity
       SQL
@@ -127,8 +144,20 @@ namespace :flags do
         sev_val    = sev ? "'#{sev}'" : "NULL"
 
         total_exposure = conn.select_value(<<~SQL).to_f
-          SELECT COALESCE(SUM(COALESCE(NULLIF(c.total_effective_price, 0), c.base_price)), 0)
+          WITH winner_counts AS (
+            SELECT contract_id, COUNT(*) AS cnt
+            FROM contract_winners
+            GROUP BY contract_id
+          )
+          SELECT COALESCE(SUM(
+            CASE
+              WHEN c.total_effective_price > 0 THEN c.total_effective_price
+              WHEN wc.cnt IS NOT NULL           THEN c.base_price / wc.cnt
+              ELSE 0
+            END
+          ), 0)
           FROM contracts c
+          LEFT JOIN winner_counts wc ON wc.contract_id = c.id
           WHERE c.id IN (SELECT DISTINCT f.contract_id FROM flags f #{sev_filter})
         SQL
 
