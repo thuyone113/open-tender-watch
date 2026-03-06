@@ -23,8 +23,16 @@ module Flags
     private
 
     # One row per (entity_id, flag_type, severity) — pre-aggregated from flags JOIN contracts.
+    #
+    # B5 (Benford) is special: a single representative contract is flagged per
+    # entity, but the meaningful metric is the whole entity's distribution.
+    # We therefore use benford_analyses.sample_size as contract_count and
+    # entities.total_contracted_value as total_exposure for B5 rows, and handle
+    # all other flags with the standard contract-level aggregation.
     def aggregate_entity_stats(conn, now)
       conn.execute("DELETE FROM flag_entity_stats")
+
+      # Standard flags — one flag row maps to one contract.
       conn.execute(<<~SQL)
         INSERT INTO flag_entity_stats
           (entity_id, flag_type, severity, total_exposure, contract_count,
@@ -38,7 +46,29 @@ module Flags
           '#{now}', '#{now}', '#{now}'
         FROM flags f
         JOIN contracts c ON c.id = f.contract_id
+        WHERE f.flag_type != 'B5_BENFORD_DEVIATION'
         GROUP BY c.contracting_entity_id, f.flag_type, f.severity
+      SQL
+
+      # B5 Benford: one flag per entity flagged, but count = full sample size
+      # and exposure = entity's total contracted value.
+      conn.execute(<<~SQL)
+        INSERT INTO flag_entity_stats
+          (entity_id, flag_type, severity, total_exposure, contract_count,
+           computed_at, created_at, updated_at)
+        SELECT
+          ba.entity_id,
+          'B5_BENFORD_DEVIATION'            AS flag_type,
+          f.severity,
+          COALESCE(e.total_contracted_value, 0) AS total_exposure,
+          ba.sample_size                    AS contract_count,
+          '#{now}', '#{now}', '#{now}'
+        FROM benford_analyses ba
+        JOIN flags f
+          ON f.contract_id = ba.representative_contract_id
+         AND f.flag_type   = 'B5_BENFORD_DEVIATION'
+        JOIN entities e ON e.id = ba.entity_id
+        WHERE ba.flagged = 1
       SQL
     end
 
