@@ -28,50 +28,54 @@
 
     <%# Contract list %>
     <div>
-      <%# Flag filter chips %>
-      <% if @flag_types.any? %>
-        <div class="flex flex-wrap items-center gap-2 mb-4">
-          <span class="font-mono text-[10px] tracking-[2px] text-white/35 uppercase shrink-0"><%= t("entities.show.filter_by_flag") %>:</span>
-          <%= link_to entity_path(@entity, sort: @sort_col, dir: @sort_dir, page: 1),
-                class: "font-mono text-[10px] px-2.5 py-1 rounded border transition-all #{@flag_filter.nil? ? 'border-white/30 text-white/60 bg-white/[0.06]' : 'border-white/10 text-white/30 hover:text-white/60 hover:border-white/20'}" do %>
-            <%= t("entities.show.filter_all_flags") %>
-          <% end %>
-          <% @flag_types.each do |ft| %>
-            <% active_ft = @flag_filter == ft %>
-            <% chip_color = active_ft ? "border-[#c8a84e66] text-[#c8a84e] bg-[#c8a84e0d]" : "border-white/10 text-white/30 hover:text-white/60 hover:border-white/20" %>
-            <%= link_to entity_path(@entity, sort: @sort_col, dir: @sort_dir, flag_type: ft, page: 1),
-                  class: "font-mono text-[10px] px-2.5 py-1 rounded border transition-all #{chip_color}" do %>
-              <%= flag_type_label(ft) %>
+      <%= turbo_frame_tag "entity-contracts",
+            data: {
+              controller: "entity-contracts",
+              action: "turbo:before-fetch-request->entity-contracts#start turbo:frame-load->entity-contracts#finish"
+            } do %>
+        <%# Flag filter chips %>
+        <% if @flag_types.any? %>
+          <div class="flex flex-wrap items-center gap-2 mb-4">
+            <span class="font-mono text-[10px] tracking-[2px] text-white/35 uppercase shrink-0"><%= t("entities.show.filter_by_flag") %>:</span>
+            <%= link_to entity_path(@entity, sort: @sort_col, dir: @sort_dir, page: 1),
+                  class: "font-mono text-[10px] px-2.5 py-1 rounded border transition-all #{@flag_filter.nil? ? 'border-white/30 text-white/60 bg-white/[0.06]' : 'border-white/10 text-white/30 hover:text-white/60 hover:border-white/20'}" do %>
+              <%= t("entities.show.filter_all_flags") %>
+            <% end %>
+            <% @flag_types.each do |ft| %>
+              <% active_ft = @flag_filter == ft %>
+              <% chip_color = active_ft ? "border-[#c8a84e66] text-[#c8a84e] bg-[#c8a84e0d]" : "border-white/10 text-white/30 hover:text-white/60 hover:border-white/20" %>
+              <%= link_to entity_path(@entity, sort: @sort_col, dir: @sort_dir, flag_type: ft, page: 1),
+                    class: "font-mono text-[10px] px-2.5 py-1 rounded border transition-all #{chip_color}" do %>
+                <%= flag_type_label(ft) %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+
+        <%# Sort controls %>
+        <div class="flex items-center gap-3 mb-4">
+          <span class="font-mono text-[10px] tracking-[2px] text-white/35 uppercase"><%= t("entities.show.sort_by") %>:</span>
+          <% [["celebration_date", t("entities.show.sort_date")], ["base_price", t("entities.show.sort_price")], ["object", t("entities.show.sort_object")]].each do |col, label| %>
+            <% active = @sort_col == col %>
+            <% next_dir = (active && @sort_dir == "desc") ? "asc" : "desc" %>
+            <%= link_to entity_path(@entity, sort: col, dir: next_dir, flag_type: @flag_filter, page: 1),
+                  class: "font-mono text-[10px] tracking-[1px] px-2.5 py-1 rounded border transition-all #{active ? 'border-[#c8a84e66] text-[#c8a84e] bg-[#c8a84e0d]' : 'border-white/10 text-white/35 hover:text-white/60 hover:border-white/20'}" do %>
+              <%= label %>
+              <% if active %>
+                <%= @sort_dir == "asc" ? " ↑" : " ↓" %>
+              <% end %>
             <% end %>
           <% end %>
         </div>
-      <% end %>
 
-      <%# Sort controls %>
-      <div class="flex items-center gap-3 mb-4">
-        <span class="font-mono text-[10px] tracking-[2px] text-white/35 uppercase"><%= t("entities.show.sort_by") %>:</span>
-        <% [["celebration_date", t("entities.show.sort_date")], ["base_price", t("entities.show.sort_price")], ["object", t("entities.show.sort_object")]].each do |col, label| %>
-          <% active = @sort_col == col %>
-          <% next_dir = (active && @sort_dir == "desc") ? "asc" : "desc" %>
-          <%= link_to entity_path(@entity, sort: col, dir: next_dir, flag_type: @flag_filter, page: 1),
-                class: "font-mono text-[10px] tracking-[1px] px-2.5 py-1 rounded border transition-all #{active ? 'border-[#c8a84e66] text-[#c8a84e] bg-[#c8a84e0d]' : 'border-white/10 text-white/35 hover:text-white/60 hover:border-white/20'}" do %>
-            <%= label %>
-            <% if active %>
-              <%= @sort_dir == "asc" ? " ↑" : " ↓" %>
-            <% end %>
-          <% end %>
+        <%# Pagination info%>
+        <% if @total_pages > 1 || @total > 0 %>
+          <p class="font-mono text-[11px] text-white/30 mb-3">
+            <%= t("contracts.index.pagination.info", page: @page, total_pages: [@total_pages, 1].max, total: number_with_delimiter(@total)) %>
+          </p>
         <% end %>
-      </div>
 
-      <%# Pagination info%>
-      <% if @total_pages > 1 || @total > 0 %>
-        <p class="font-mono text-[11px] text-white/30 mb-3">
-          <%= t("contracts.index.pagination.info", page: @page, total_pages: [@total_pages, 1].max, total: number_with_delimiter(@total)) %>
-        </p>
-      <% end %>
-
-      <%# Table %>
-      <%= turbo_frame_tag "entity-contracts" do %>
+        <%# Table %>
         <div class="border border-white/[0.08] rounded-lg overflow-hidden">
           <%# Header row %>
           <div class="hidden sm:grid grid-cols-[1fr_140px_100px_90px] bg-white/[0.03] px-4 py-3 border-b border-white/[0.08] font-mono text-[10px] tracking-[2px] text-white/35 uppercase">
@@ -166,7 +170,7 @@
           <div>
             <div class="font-mono text-[10px] text-white/30 mb-0.5"><%= t("entities.show.total_contracts") %></div>
             <div class="font-['Space_Grotesk'] text-2xl font-bold text-[#c8a84e]">
-              <%= number_with_delimiter(@total) %>
+              <%= number_with_delimiter(@entity_contract_total) %>
             </div>
           </div>
         </div>

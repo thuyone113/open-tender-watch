@@ -71,4 +71,32 @@ class EntitiesControllerTest < ActionDispatch::IntegrationTest
     get entity_url(entities(:one), flag_type: "A2")
     assert_response :success
   end
+
+  test "show filters flagged contracts inside the turbo frame without crashing" do
+    flag_type = "A2_PUBLICATION_AFTER_CELEBRATION"
+
+    Flag.create!(
+      contract: contracts(:one),
+      flag_type: flag_type,
+      severity: "high",
+      score: 40,
+      details: { rule: "A2/A3 date sequence anomaly" },
+      fired_at: Time.current
+    )
+
+    FlagEntityStat.create!(
+      entity: entities(:one),
+      flag_type: flag_type,
+      severity: "high",
+      total_exposure: contracts(:one).base_price,
+      contract_count: 1,
+      computed_at: Time.current
+    )
+
+    get entity_url(entities(:one), flag_type: flag_type), headers: { "Turbo-Frame" => "entity-contracts" }
+
+    assert_response :success
+    assert_includes response.body, contracts(:one).object
+    assert_not_includes response.body, contracts(:two).object
+  end
 end

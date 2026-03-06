@@ -47,6 +47,7 @@ class EntitiesController < ApplicationController
     @flag_filter = params[:flag_type].presence
 
     base_scope = @entity.contracts_as_contracting_entity
+    @entity_contract_total = base_scope.count
 
     if @flag_filter.present?
       base_scope = base_scope.joins(:flags).where(flags: { flag_type: @flag_filter }).distinct
@@ -59,9 +60,11 @@ class EntitiesController < ApplicationController
     @page        = [ params[:page].to_i, 1 ].max
     @total_pages = [ (@total.to_f / PER_PAGE).ceil, 1 ].max
 
+    order_sql = "#{Contract.table_name}.#{@sort_col} #{@sort_dir}, #{Contract.table_name}.id #{@sort_dir}"
+
     @contracts = base_scope
       .includes(:winners, :data_source, :flags)
-      .order(Arel.sql("#{@sort_col} #{@sort_dir}, id #{@sort_dir}"))
+      .order(Arel.sql(order_sql))
       .limit(PER_PAGE)
       .offset((@page - 1) * PER_PAGE)
   end
