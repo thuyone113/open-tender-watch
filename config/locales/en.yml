@@ -204,6 +204,28 @@ en:
     en: "EN"
     pt: "PT"
 
+  flags:
+    types:
+      a1_repeat_direct_award: "Repeat Direct Award"
+      a2_publication_after_celebration: "Late Publication"
+      a3_execution_before_publication: "Execution Before Publication"
+      a4_amendment_inflation: "Amendment Inflation"
+      a5_threshold_splitting: "Threshold Splitting"
+      a6_single_bidder: "Single Bidder"
+      a7_abnormal_direct_award_rate: "Abnormal Direct-Award Rate"
+      a8_long_execution: "Long Execution"
+      a9_price_anomaly: "Price Anomaly"
+      b1_bid_rotation: "Bid Rotation"
+      b2_supplier_concentration: "Supplier Concentration"
+      b3_unusual_pricing: "Unusual Pricing"
+      b4_procedural_shift: "Procedural Shift"
+      b5_benford_deviation: "Benford's Law Deviation"
+      c1_missing_supplier_nif: "Missing Supplier NIF"
+      c2_impossible_date_sequence: "Impossible Date Sequence"
+      c3_missing_mandatory_fields: "Missing Mandatory Fields"
+      c4_adc_sanction_overlap: "AdC Sanction Overlap"
+      c5_entity_name_variation: "Entity Name Variation"
+
   entities:
     index:
       title: "Entities"

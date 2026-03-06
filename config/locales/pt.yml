@@ -199,6 +199,28 @@ pt:
     en: "EN"
     pt: "PT"
 
+  flags:
+    types:
+      a1_repeat_direct_award: "Adjudicação Direta Repetida"
+      a2_publication_after_celebration: "Publicação Tardia"
+      a3_execution_before_publication: "Execução antes da Publicação"
+      a4_amendment_inflation: "Inflação por Modificação"
+      a5_threshold_splitting: "Fracionamento de Limiares"
+      a6_single_bidder: "Concorrente Único"
+      a7_abnormal_direct_award_rate: "Taxa Anormal de Ajuste Direto"
+      a8_long_execution: "Execução Prolongada"
+      a9_price_anomaly: "Anomalia de Preço"
+      b1_bid_rotation: "Rotação de Propostas"
+      b2_supplier_concentration: "Concentração de Fornecedores"
+      b3_unusual_pricing: "Preço Invulgar"
+      b4_procedural_shift: "Mudança Procedimental"
+      b5_benford_deviation: "Desvio da Lei de Benford"
+      c1_missing_supplier_nif: "NIF do Fornecedor em Falta"
+      c2_impossible_date_sequence: "Sequência de Datas Impossível"
+      c3_missing_mandatory_fields: "Campos Obrigatórios em Falta"
+      c4_adc_sanction_overlap: "Sobreposição de Sanção AdC"
+      c5_entity_name_variation: "Variação do Nome da Entidade"
+
   entities:
     index:
       title: "Entidades"

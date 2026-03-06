@@ -95,7 +95,7 @@
           <%= link_to dashboard_index_path(entity_flag_type: flag_type, entity_sort: @entity_sort, severity: @severity_filter),
                 class: "bg-white/[0.02] border border-white/[0.06] rounded-lg p-4 hover:border-[#c8a84e44] transition-colors group" do %>
             <div class="font-mono text-[10px] tracking-[1px] text-[#c8a84e] mb-2 group-hover:text-[#c8a84e]">
-              <%= flag_type.tr("_", " ") %>
+              <%= flag_type_label(flag_type) %>
             </div>
             <div class="font-['Space_Grotesk'] text-2xl font-bold text-[#e8e0d4]"><%= number_with_delimiter(count) %></div>
             <div class="font-mono text-[10px] text-white/30 mt-0.5">
@@ -123,7 +123,7 @@
           <div>
             <label class="block font-mono text-[10px] tracking-[2px] text-white/40 mb-1"><%= t("dashboard.entity_exposure.flag") %></label>
             <%= f.select :entity_flag_type,
-                [[t("dashboard.entity_exposure.all_flags"), ""]] + @flag_types.map { |flag_type| [flag_type, flag_type] },
+                [[t("dashboard.entity_exposure.all_flags"), ""]] + @flag_types.map { |flag_type| [flag_type_label(flag_type), flag_type] },
                 { selected: @entity_flag_type },
                 class: "bg-black/30 border border-white/10 rounded px-2.5 py-2 font-mono text-xs text-white/75 focus:outline-hidden focus:border-[#c8a84e66]" %>
           </div>
@@ -157,7 +157,7 @@
                 <div class="divide-y divide-white/5">
                   <% @entity_exposure_rows.each do |row| %>
                     <%= link_to entity_path(row[:entity_id]), class: "grid grid-cols-[160px_1fr_160px_120px] gap-3 py-2.5 font-mono text-xs hover:bg-white/[0.02] transition-colors rounded" do %>
-                      <span class="text-[#c8a84e]"><%= row[:flag_type].to_s.tr("_", " ").squeeze(" ").strip %></span>
+                      <span class="text-[#c8a84e]"><%= flag_type_label(row[:flag_type]) %></span>
                       <span class="text-white/75 truncate"><%= row[:entity_name] %></span>
                       <span class="text-right text-white/65"><%= number_to_currency(row[:exposure_value], unit: "€", delimiter: ",", separator: ".", format: "%u%n", precision: 2) %></span>
                       <span class="text-right text-[#e8e0d4]"><%= number_with_delimiter(row[:exposure_count]) %></span>

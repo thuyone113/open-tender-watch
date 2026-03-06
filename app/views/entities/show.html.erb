@@ -80,7 +80,7 @@
                     <div class="mt-1.5 flex flex-wrap gap-1">
                       <% contract.flags.first(2).each do |flag| %>
                         <span class="font-mono text-[9px] tracking-wide text-[#ff6666] bg-[#ff444412] border border-[#ff444433] px-1.5 py-0.5 rounded">
-                          <%= flag.flag_type %>
+                          <%= flag_type_label(flag.flag_type) %>
                         </span>
                       <% end %>
                       <% if contract.flags.size > 2 %>
@@ -154,7 +154,7 @@
               <% color = stat.severity == "high" ? "text-[#ff4444]" : stat.severity == "medium" ? "text-[#ff8844]" : "text-[#c8a84e]" %>
               <div class="border-b border-white/5 pb-3 last:border-0 last:pb-0">
                 <div class="font-mono text-[10px] <%= color %> mb-1">
-                  <%= stat.flag_type.to_s.tr("_", " ").squeeze(" ").strip %>
+                  <%= flag_type_label(stat.flag_type) %>
                 </div>
                 <div class="flex items-baseline justify-between">
                   <span class="font-['Space_Grotesk'] text-sm font-bold text-[#e8e0d4]">
