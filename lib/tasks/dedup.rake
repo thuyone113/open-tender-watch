@@ -125,4 +125,108 @@ namespace :dedup do
     puts "Winners merged   : #{winners_merged}"
     puts dry_run ? "==> DRY RUN complete — DB unchanged." : "==> Done."
   end
+
+  # ---------------------------------------------------------------------------
+  # dedup:ted_same_tender — collapse within-source TED notice duplicates.
+  #
+  # TED publishes multiple notices per procurement (contract notice, corrigenda,
+  # modifications, award notices) all with distinct publication numbers but
+  # representing the same physical tender.  Before the TED client was patched to
+  # skip COR/can-modifies notices, they were imported as separate Contract rows.
+  #
+  # Strategy:
+  #   Group by (data_source_id, contracting_entity_id, base_price, cpv_code)
+  #   within the TED data source.  For each group with more than one contract,
+  #   keep the one with the lowest id (earliest imported ≈ original CN notice).
+  #   Reassign flags & winners then delete the rest — identical logic to dedup:run.
+  #
+  # Usage:
+  #   bundle exec rails dedup:ted_same_tender
+  #   DRY_RUN=1 bundle exec rails dedup:ted_same_tender
+  # ---------------------------------------------------------------------------
+  desc "Collapse within-source TED notice duplicates (corrigenda / modifications)"
+  task ted_same_tender: :environment do
+    dry_run = ENV["DRY_RUN"].present?
+    puts dry_run ? "==> DRY RUN — no changes will be committed" : "==> Deduplicating within-source TED notices..."
+
+    ted_source_ids = DataSource
+      .where(adapter_class: "PublicContracts::EU::TedClient")
+      .pluck(:id)
+
+    if ted_source_ids.empty?
+      puts "No TED DataSource records found — nothing to do."
+      next
+    end
+
+    # Groups where the same entity+price+CPV appears more than once in TED
+    duplicate_groups = Contract
+      .select(Arel.sql(
+        "data_source_id, contracting_entity_id, base_price, COALESCE(cpv_code, '') AS cpv_key, " \
+        "GROUP_CONCAT(id) AS contract_ids, COUNT(*) AS cnt"
+      ))
+      .where(data_source_id: ted_source_ids)
+      .where.not(base_price: nil)
+      .group(Arel.sql("data_source_id, contracting_entity_id, base_price, COALESCE(cpv_code, '')"))
+      .having("COUNT(*) > 1")
+
+    groups_processed  = 0
+    contracts_deleted = 0
+    flags_reassigned  = 0
+    flags_dropped     = 0
+    winners_merged    = 0
+
+    ActiveRecord::Base.transaction do
+      duplicate_groups.each do |group|
+        ids = group.contract_ids.to_s.split(",").map(&:to_i).sort
+        winner_id = ids.first
+        loser_ids = ids.drop(1)
+
+        # --- Reassign flags --------------------------------------------------
+        existing_flag_types = Flag.where(contract_id: winner_id)
+                                  .pluck(:flag_type)
+                                  .to_set
+
+        Flag.where(contract_id: loser_ids).each do |flag|
+          if existing_flag_types.include?(flag.flag_type)
+            flags_dropped += 1
+            flag.delete unless dry_run
+          else
+            existing_flag_types.add(flag.flag_type)
+            flags_reassigned += 1
+            flag.update_columns(contract_id: winner_id) unless dry_run
+          end
+        end
+
+        # --- Reassign contract_winners ---------------------------------------
+        existing_entity_ids = ContractWinner.where(contract_id: winner_id)
+                                             .pluck(:entity_id)
+                                             .to_set
+
+        ContractWinner.where(contract_id: loser_ids).each do |cw|
+          if existing_entity_ids.include?(cw.entity_id)
+            cw.delete unless dry_run
+          else
+            existing_entity_ids.add(cw.entity_id)
+            winners_merged += 1
+            cw.update_columns(contract_id: winner_id) unless dry_run
+          end
+        end
+
+        # --- Delete loser contracts ------------------------------------------
+        contracts_deleted += loser_ids.size
+        Contract.where(id: loser_ids).delete_all unless dry_run
+
+        groups_processed += 1
+      end
+
+      raise ActiveRecord::Rollback if dry_run
+    end
+
+    puts "Duplicate groups : #{groups_processed}"
+    puts "Contracts deleted: #{contracts_deleted}"
+    puts "Flags reassigned : #{flags_reassigned}"
+    puts "Flags dropped    : #{flags_dropped}  (flag_type already on winner)"
+    puts "Winners merged   : #{winners_merged}"
+    puts dry_run ? "==> DRY RUN complete — DB unchanged." : "==> Done."
+  end
 end
