@@ -145,6 +145,21 @@ namespace :flags do
       end
     end
 
+    # Clear dashboard cache keys so the next page load reflects updated stats.
+    # SolidCache does not support delete_matched, so we delete known keys.
+    dashboard_cache_keys = [
+      "dashboard/flag_types",
+      *%w[nil high medium low].flat_map { |sev|
+        sev_str = sev == "nil" ? "" : sev
+        [
+          "dashboard/flags_count/sev:#{sev_str}",
+          "dashboard/flags_by_type/sev:#{sev_str}"
+        ]
+      }
+    ]
+    dashboard_cache_keys.each { |k| Rails.cache.delete(k) }
+    puts "Dashboard cache cleared (#{dashboard_cache_keys.size} keys)."
+
     puts "Aggregation complete."
   end
 
